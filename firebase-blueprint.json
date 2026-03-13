@@ -1,0 +1,59 @@
+{
+  "entities": {
+    "Visitor": {
+      "title": "Visitor",
+      "description": "A record of a library visitor session",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["student", "faculty", "outsider"] },
+        "identifier": { "type": "string" },
+        "department": { "type": "string" },
+        "university": { "type": "string" },
+        "occupation": { "type": "string" },
+        "address": { "type": "string" },
+        "contact": { "type": "string" },
+        "purpose": { "type": "string" },
+        "check_in": { "type": "string", "format": "date-time" },
+        "check_out": { "type": "string", "format": "date-time" },
+        "is_blocked": { "type": "integer" }
+      },
+      "required": ["name", "type", "purpose", "check_in"]
+    },
+    "Member": {
+      "title": "Member",
+      "description": "A registered student or faculty member",
+      "type": "object",
+      "properties": {
+        "identifier": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "department": { "type": "string" }
+      },
+      "required": ["identifier", "name", "type"]
+    },
+    "Blocked": {
+      "title": "Blocked",
+      "description": "A record of a blocked identifier",
+      "type": "object",
+      "properties": {
+        "identifier": { "type": "string" }
+      },
+      "required": ["identifier"]
+    }
+  },
+  "firestore": {
+    "/visitors/{visitorId}": {
+      "schema": "Visitor",
+      "description": "Collection of all visitor logs"
+    },
+    "/members/{memberId}": {
+      "schema": "Member",
+      "description": "Collection of registered members"
+    },
+    "/blocked/{blockedId}": {
+      "schema": "Blocked",
+      "description": "Collection of blocked identifiers"
+    }
+  }
+}

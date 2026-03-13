@@ -1,0 +1,21 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-brand-light-bg: #FFFFFF;
+  --color-brand-light-primary: #2D5A27;
+  --color-brand-light-secondary: #A3B18A;
+  --color-brand-light-accent: #B07D62;
+
+  --color-brand-dark-bg: #1A1C1E;
+  --color-brand-dark-primary: #FFFFFF;
+  --color-brand-dark-secondary: #D2B48C;
+  --color-brand-dark-accent: #AD665C;
+}
+
+@layer base {
+  body {
+    @apply transition-colors duration-300;
+  }
+}

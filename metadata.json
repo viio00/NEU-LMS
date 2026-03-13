@@ -1,0 +1,7 @@
+{
+  "name": "NEU LibTrac",
+  "description": "A comprehensive visitor management system for New Era University Library with visitor logging, purpose tracking, and admin analytics.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

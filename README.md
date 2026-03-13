@@ -1,11 +1,46 @@
-<div align="center">
+# NEU Library Visitor Management System
 
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
+A full-stack application for managing library visitors with QR code support, real-time analytics, and an admin dashboard.
 
-  <h1>Built with AI Studio</h2>
+## Prerequisites
 
-  <p>The fastest path from prompt to production with Gemini.</p>
+- [Node.js](https://nodejs.org/) (v18 or higher recommended)
+- npm (comes with Node.js)
 
-  <a href="https://aistudio.google.com/apps">Start building</a>
+## Setup Instructions
 
-</div>
+1. **Download/Extract the files** into a folder on your computer.
+2. **Open the folder in VS Code**.
+3. **Open a Terminal** in VS Code (`Ctrl+` ` or `Terminal > New Terminal`).
+4. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
+5. **Start the Development Server**:
+   ```bash
+   npm run dev
+   ```
+6. **Open the App**:
+   Navigate to `http://localhost:3000` in your web browser.
+
+## Project Structure
+
+- `server.ts`: Express backend with SQLite database logic.
+- `src/App.tsx`: Main React frontend application.
+- `src/index.css`: Tailwind CSS styling and theme configuration.
+- `library.db`: The SQLite database file (created automatically on first run).
+- `package.json`: Project dependencies and scripts.
+
+## Admin Credentials
+
+- **Email**: `admin1@neu.edu.ph`
+- **Password**: `passW@rd`
+
+## Features
+
+- **Visitor Mode**: Check-in/out with ID number or QR code.
+- **Admin Dashboard**: Real-time stats, visitor trends, and purpose distribution.
+- **Activity Logs**: Searchable history of all visitors.
+- **Blocking System**: Prevent specific IDs from entering.
+- **PDF Export**: Generate visitor reports.
+- **Dark/Light Mode**: Fully responsive and themed UI.
