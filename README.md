@@ -44,8 +44,4 @@ A professional full-stack application for managing library visitor sessions with
 5. **Open the App**:
    Navigate to `http://localhost:3000` in your web browser.
 
-## 🔐 Admin Access
 
-Authorized administrators can log in using their NEU Google accounts.
-- **Authorized Emails:** `chynna.cardona@neu.edu.ph`, `cardonachynnam@gmail.com`, `jcesperanza@neu.edu.ph`.
-- **Testing Password:** `passW@rd` (for local dev accounts).
