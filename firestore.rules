@@ -43,7 +43,15 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-          (request.auth.token.email == "chynna.cardona@neu.edu.ph" && request.auth.token.email_verified == true));
+          (request.auth.token.email == "chynna.cardona@neu.edu.ph" && request.auth.token.email_verified == true) ||
+          (request.auth.token.email == "jcesperanza@neu.edu.ph" && request.auth.token.email_verified == true) ||
+          (request.auth.token.email == "cardonachynnam@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isOwner() {
+      return isAuthenticated() &&
+        ((request.auth.token.email == "jcesperanza@neu.edu.ph" && request.auth.token.email_verified == true) ||
+         (request.auth.token.email == "cardonachynnam@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isValidVisitor(data) {
@@ -67,24 +75,24 @@ service cloud.firestore {
       // Update is for check-out or admin blocking
       allow update: if (isValidVisitor(request.resource.data) && 
                        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['check_out', 'is_blocked'])) ||
-                       isAdmin();
+                       isAdmin() || isOwner();
       
       // Read is for admins
-      allow read: if isAdmin();
+      allow read: if isAdmin() || isOwner();
     }
 
     match /members/{memberId} {
       allow read: if true; // Kiosk needs to check if member exists
-      allow write: if isAdmin();
+      allow write: if isAdmin() || isOwner();
     }
 
     match /blocked/{blockedId} {
       allow read: if true; // Kiosk needs to check if blocked
-      allow write: if isAdmin();
+      allow write: if isAdmin() || isOwner();
     }
 
     match /users/{userId} {
-      allow read, write: if request.auth.uid == userId || isAdmin();
+      allow read, write: if request.auth.uid == userId || isAdmin() || isOwner();
     }
   }
 }

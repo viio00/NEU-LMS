@@ -40,6 +40,17 @@
         "identifier": { "type": "string" }
       },
       "required": ["identifier"]
+    },
+    "User": {
+      "title": "User",
+      "description": "A system user with a role",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["admin", "user"] },
+        "displayName": { "type": "string" }
+      },
+      "required": ["email", "role"]
     }
   },
   "firestore": {
@@ -54,6 +65,10 @@
     "/blocked/{blockedId}": {
       "schema": "Blocked",
       "description": "Collection of blocked identifiers"
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "Collection of system users"
     }
   }
 }
