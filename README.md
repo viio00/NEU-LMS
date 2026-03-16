@@ -1,4 +1,4 @@
-# NEU Library Visitor Management System
+# NEU Library Management System
 
 A full-stack application for managing library visitors with QR code support, real-time analytics, and an admin dashboard.
 
