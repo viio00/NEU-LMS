@@ -2,6 +2,8 @@
 
 A full-stack application for managing library visitors with QR code support, real-time analytics, and an admin dashboard.
 
+[CLICK HERE FOR WEB APP](https://ai.studio/apps/ef5586b8-ca83-437e-a6d7-a3866d1aac94?fullscreenApplet=true)
+
 ## Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18 or higher recommended)
