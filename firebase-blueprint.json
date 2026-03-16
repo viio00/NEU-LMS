@@ -27,6 +27,7 @@
       "properties": {
         "identifier": { "type": "string" },
         "name": { "type": "string" },
+        "email": { "type": "string" },
         "type": { "type": "string" },
         "department": { "type": "string" }
       },

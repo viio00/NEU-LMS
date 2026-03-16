@@ -227,19 +227,19 @@ export function App() {
 
   useEffect(() => {
     async function seedFirestore() {
-      const membersRef = collection(db, 'members');
-      const snap = await getDocs(membersRef);
-      if (snap.empty) {
-        const members = [
-          { identifier: '00-00000-000', name: 'Lastname1, Firstname I.', type: 'student', department: '2nd Year BS Information Technology' },
-          { identifier: '11-11111-111', name: 'Lastname2, Firstname II.', type: 'student', department: '4th Year BS Computer Science' },
-          { identifier: '22-22222-222', name: 'Lastname3, Firstname III', type: 'student', department: '1st Year BS Medical Technology' },
-          { identifier: '99-99999-999', name: 'Employee 1', type: 'faculty', department: 'CICS Department' },
-          { identifier: '77-77777-777', name: 'Employee 2', type: 'faculty', department: 'CAS Department' },
-        ];
-        for (const m of members) {
-          await setDoc(doc(db, 'members', m.identifier), m);
-        }
+      const members = [
+        { identifier: '00-00000-000', name: 'Lastname1, Firstname I.', type: 'student', department: '2nd Year BS Information Technology', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
+        { identifier: '11-11111-111', name: 'Lastname2, Firstname II.', type: 'student', department: '4th Year BS Computer Science', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
+        { identifier: '22-22222-222', name: 'Lastname3, Firstname III', type: 'student', department: '1st Year BS Medical Technology', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
+        { identifier: '99-99999-999', name: 'Employee 1', type: 'faculty', department: 'CICS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
+        { identifier: '77-77777-777', name: 'Employee 2', type: 'faculty', department: 'CAS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
+        { identifier: 'ST-2024-001', name: 'Cardona, Chynna M.', email: 'cardonachynnam@gmail.com', type: 'student', department: 'CICS Department', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
+        { identifier: 'FC-2024-001', name: 'Esperanza, J.C.', email: 'jcesperanza@neu.edu.ph', type: 'faculty', department: 'CICS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
+      ];
+      
+      for (const m of members) {
+        // Use setDoc to ensure these members always exist with correct data
+        await setDoc(doc(db, 'members', m.identifier), m, { merge: true });
       }
     }
     seedFirestore();
@@ -411,11 +411,30 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
 
-  const handleIdSubmit = async (id: string, type: VisitorType, extraData?: any) => {
+  const handleIdSubmit = async (id: string, type: VisitorType, extraData?: any, email?: string) => {
     setIsProcessing(true);
     try {
+      let finalId = id;
+      let finalExtra = extraData || {};
+
+      // If email is provided, try to find the member by email first
+      if (email && type !== 'outsider') {
+        const membersRef = collection(db, 'members');
+        const qEmail = query(membersRef, where('email', '==', email));
+        const emailSnap = await getDocs(qEmail);
+        
+        if (!emailSnap.empty) {
+          const memberData = emailSnap.docs[0].data();
+          finalId = memberData.identifier;
+          finalExtra = memberData;
+        } else if (!id) {
+          // If only email was provided and not found
+          throw new Error("Email not registered. Please check your email or use your ID.");
+        }
+      }
+
       // Check if blocked
-      const blockedRef = doc(db, 'blocked', id);
+      const blockedRef = doc(db, 'blocked', finalId);
       const blockedSnap = await getDoc(blockedRef);
       if (blockedSnap.exists()) {
         throw new Error("This ID is blocked.");
@@ -424,14 +443,14 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
       // Check if already checked in
       const qActive = query(
         collection(db, 'visitors'),
-        where('identifier', '==', id),
+        where('identifier', '==', finalId),
         where('check_out', '==', null)
       );
       const activeSnap = await getDocs(qActive);
       
       // Fallback check for records where check_out might be missing (undefined)
       const hasActiveSession = !activeSnap.empty || (await (async () => {
-        const qAll = query(collection(db, 'visitors'), where('identifier', '==', id));
+        const qAll = query(collection(db, 'visitors'), where('identifier', '==', finalId));
         const allSnap = await getDocs(qAll);
         return allSnap.docs.some(d => !d.data().check_out);
       })());
@@ -440,18 +459,17 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
         throw new Error("You are currently 'In Library'. Please check out first before checking in again.");
       }
 
-      let finalExtra = extraData || {};
-      if (type !== 'outsider') {
-        const memberRef = doc(db, 'members', id);
+      if (type !== 'outsider' && !finalExtra.identifier) {
+        const memberRef = doc(db, 'members', finalId);
         const memberSnap = await getDoc(memberRef);
         if (memberSnap.exists()) {
           finalExtra = memberSnap.data();
         } else {
-          throw new Error("Member not found. Please check your ID.");
+          throw new Error("Member not found. Please check your ID or Email.");
         }
       }
 
-      setVisitorData({ ...finalExtra, identifier: id, type });
+      setVisitorData({ ...finalExtra, identifier: finalId, type });
       setStep('purpose');
     } catch (err: any) {
       setErrorMessage(err.message);
@@ -482,12 +500,39 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
     }
   };
 
-  const handleCheckOut = async (id: string) => {
+  const handleCheckOut = async (id: string, email?: string) => {
     setIsProcessing(true);
     try {
+      let finalId = id;
+
+      // If only email is provided, find the identifier
+      if (email && !id) {
+        const membersRef = collection(db, 'members');
+        const qEmail = query(membersRef, where('email', '==', email));
+        const emailSnap = await getDocs(qEmail);
+        if (!emailSnap.empty) {
+          finalId = emailSnap.docs[0].data().identifier;
+        } else {
+          // If not a member, maybe they checked in as outsider with email?
+          // But outsiders use name/identifier.
+          // Let's check visitors by email
+          const qVisitorEmail = query(
+            collection(db, 'visitors'),
+            where('email', '==', email),
+            where('check_out', '==', null)
+          );
+          const visitorSnap = await getDocs(qVisitorEmail);
+          if (!visitorSnap.empty) {
+            finalId = visitorSnap.docs[0].data().identifier;
+          } else {
+            throw new Error("No active session found for this email.");
+          }
+        }
+      }
+
       const q = query(
         collection(db, 'visitors'), 
-        where('identifier', '==', id), 
+        where('identifier', '==', finalId), 
         where('check_out', '==', null)
       );
       const querySnapshot = await getDocs(q);
@@ -500,7 +545,7 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
         // Fallback for undefined check_out
         const q2 = query(
           collection(db, 'visitors'), 
-          where('identifier', '==', id)
+          where('identifier', '==', finalId)
         );
         const snap2 = await getDocs(q2);
         const active = snap2.docs.find(d => !d.data().check_out);
@@ -553,12 +598,13 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
 }
 
 function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: { 
-  onNext: (id: string, type: VisitorType, extra?: any) => void,
-  onCheckOut: (id: string) => void,
+  onNext: (id: string, type: VisitorType, extra?: any, email?: string) => void,
+  onCheckOut: (id: string, email?: string) => void,
   isDarkMode: boolean,
   isProcessing: boolean
 }) {
   const [idInput, setIdInput] = useState('');
+  const [emailInput, setEmailInput] = useState('');
   const [isOutsider, setIsOutsider] = useState(false);
   const [qrMode, setQrMode] = useState<'in' | 'out'>('in');
   const qrModeRef = useRef<'in' | 'out'>('in');
@@ -573,7 +619,11 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
 
   const validateId = (id: string) => {
     const regex = /^\d{2}-\d{5}-\d{3}$/;
-    return regex.test(id);
+    return regex.test(id) || id.length > 5; // Allow custom IDs like ST-2024-001
+  };
+
+  const validateEmail = (email: string) => {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   };
 
   const handleScanClick = () => {
@@ -659,29 +709,62 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
 
         {!isOutsider ? (
           <div className="w-full space-y-6">
-            <div className="space-y-2">
-              <label className={cn(
-                "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
-                isDarkMode ? "text-white/80" : "text-brand-light-primary"
-              )}>Student/Faculty ID</label>
-              <input
-                type="text"
-                placeholder="00-00000-000"
-                value={idInput}
-                onChange={(e) => setIdInput(e.target.value)}
-                className={cn(
-                  "w-full px-4 py-3 rounded-2xl text-xl font-mono tracking-[0.2em] text-center transition-all duration-500 focus:outline-none focus:ring-4",
-                  isDarkMode 
-                    ? "bg-[#333] border border-white/10 text-white placeholder:text-white/20 focus:ring-white/10 focus:border-white/20" 
-                    : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20"
-                )}
-              />
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className={cn(
+                  "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
+                  isDarkMode ? "text-white/80" : "text-brand-light-primary",
+                  idInput.length > 0 && "opacity-30"
+                )}>Student/Faculty Email</label>
+                <input
+                  type="email"
+                  placeholder="example@neu.edu.ph"
+                  value={emailInput}
+                  disabled={idInput.length > 0}
+                  onChange={(e) => {
+                    setEmailInput(e.target.value);
+                    if (e.target.value.length > 0) setIdInput('');
+                  }}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-2xl text-sm font-bold tracking-widest text-center transition-all duration-500 focus:outline-none focus:ring-4",
+                    isDarkMode 
+                      ? "bg-[#333] border border-white/10 text-white placeholder:text-white/20 focus:ring-white/10 focus:border-white/20" 
+                      : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20",
+                    idInput.length > 0 && "opacity-30 cursor-not-allowed"
+                  )}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <label className={cn(
+                  "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
+                  isDarkMode ? "text-white/80" : "text-brand-light-primary",
+                  emailInput.length > 0 && "opacity-30"
+                )}>Student/Faculty ID</label>
+                <input
+                  type="text"
+                  placeholder="00-00000-000"
+                  value={idInput}
+                  disabled={emailInput.length > 0}
+                  onChange={(e) => {
+                    setIdInput(e.target.value);
+                    if (e.target.value.length > 0) setEmailInput('');
+                  }}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-2xl text-xl font-mono tracking-[0.2em] text-center transition-all duration-500 focus:outline-none focus:ring-4",
+                    isDarkMode 
+                      ? "bg-[#333] border border-white/10 text-white placeholder:text-white/20 focus:ring-white/10 focus:border-white/20" 
+                      : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20",
+                    emailInput.length > 0 && "opacity-30 cursor-not-allowed"
+                  )}
+                />
+              </div>
             </div>
 
               <div className="flex gap-3 h-14">
                 <button
-                  disabled={!validateId(idInput) || isProcessing}
-                  onClick={() => onNext(idInput, 'student')}
+                  disabled={(!validateId(idInput) && !validateEmail(emailInput)) || isProcessing}
+                  onClick={() => onNext(idInput, 'student', null, emailInput)}
                   className={cn(
                     "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
                     isDarkMode
@@ -692,8 +775,8 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                   {isProcessing ? "..." : "Check In"}
                 </button>
                 <button
-                  disabled={!validateId(idInput) || isProcessing}
-                  onClick={() => onCheckOut(idInput)}
+                  disabled={(!validateId(idInput) && !validateEmail(emailInput)) || isProcessing}
+                  onClick={() => onCheckOut(idInput, emailInput)}
                   className={cn(
                     "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
                     isDarkMode
@@ -1235,10 +1318,11 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      const userEmail = result.user.email || '';
+      const userEmail = (result.user.email || '').toLowerCase();
       
       // Check if user is in ADMINS list, OWNERS list, or has admin role in Firestore
-      const isAdminEmail = ADMINS.includes(userEmail) || OWNERS.includes(userEmail);
+      const isAdminEmail = ADMINS.map(e => e.toLowerCase()).includes(userEmail) || 
+                          OWNERS.map(e => e.toLowerCase()).includes(userEmail);
       const userDoc = await getDoc(doc(db, 'users', result.user.uid));
       const hasAdminRole = userDoc.exists() && userDoc.data().role === 'admin';
       
@@ -1254,7 +1338,7 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
         onLogin();
       } else {
         await signOut(auth);
-        setLoginError("Access denied. Only authorized administrators can log in.");
+        setLoginError(`Access denied (${userEmail}). Only authorized administrators can log in.`);
       }
     } catch (err: any) {
       setLoginError("Failed to sign in with Google. Please try again.");
@@ -1956,11 +2040,20 @@ function DetailItem({ label, value, isDarkMode }: { label: string, value: string
 }) {
   const [isOpen, setIsOpen] = useState(false);
 
-  const handleAutoLogin = async () => {
+  const handleAutoLogin = async (email: string) => {
     try {
-      await signInWithEmailAndPassword(auth, 'chynna.cardona@neu.edu.ph', 'passW@rd');
-    } catch (err) {
-      alert("Auto-login failed. Please use the admin login form with chynna.cardona@neu.edu.ph / passW@rd");
+      await signInWithEmailAndPassword(auth, email, ADMIN_PASSWORD);
+    } catch (err: any) {
+      if (err.code === 'auth/user-not-found') {
+        try {
+          await createUserWithEmailAndPassword(auth, email, ADMIN_PASSWORD);
+          // After creation, it's automatically logged in
+        } catch (createErr: any) {
+          alert(`Failed to create/login: ${createErr.message}`);
+        }
+      } else {
+        alert(`Auto-login failed: ${err.message}. Please use the admin login form with ${email} / ${ADMIN_PASSWORD}`);
+      }
     }
   };
 
@@ -2042,14 +2135,23 @@ function DetailItem({ label, value, isDarkMode }: { label: string, value: string
             </div>
 
             <div className="space-y-3">
-              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Admin Actions</p>
-              <button 
-                onClick={handleAutoLogin}
-                disabled={isAdminLoggedIn}
-                className="w-full py-3 rounded-xl bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
-              >
-                {isAdminLoggedIn ? "Admin Logged In" : "Auto-Login as Admin"}
-              </button>
+              <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Auto-Login (Admin)</p>
+              <div className="grid grid-cols-1 gap-2">
+                <button 
+                  onClick={() => handleAutoLogin('chynna.cardona@neu.edu.ph')}
+                  disabled={isAdminLoggedIn}
+                  className="w-full py-2 rounded-xl bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
+                >
+                  Login as chynna.cardona
+                </button>
+                <button 
+                  onClick={() => handleAutoLogin('cardonachynnam@gmail.com')}
+                  disabled={isAdminLoggedIn}
+                  className="w-full py-2 rounded-xl bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
+                >
+                  Login as cardonachynnam
+                </button>
+              </div>
             </div>
 
             <div className="space-y-3">
