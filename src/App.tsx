@@ -162,6 +162,7 @@ const ADMINS = [
   'admin1@neu.edu.ph'
 ];
 const OWNERS = [
+  'chynna.cardona@neu.edu.ph',
   'jcesperanza@neu.edu.ph',
   'cardonachynnam@gmail.com'
 ];
@@ -1176,14 +1177,13 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
   const [loginError, setLoginError] = useState('');
   const [stats, setStats] = useState<Stats | null>(null);
   const [visitors, setVisitors] = useState<Visitor[]>([]);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'logs' | 'qrs'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'logs'>('dashboard');
   const [searchQuery, setSearchQuery] = useState('');
   const [logFilter, setLogFilter] = useState<'today' | 'week' | 'month' | 'year' | 'all'>('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [purposeFilter, setPurposeFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
-  const [outsiderQrs, setOutsiderQrs] = useState<{qr: string, info: any}[]>([]);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -1226,22 +1226,9 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
         handleFirestoreError(err, OperationType.LIST, 'visitors');
       });
       
-      generateOutsiderQrs();
       return () => unsubscribe();
     }
   }, [isLoggedIn]);
-
-  const generateOutsiderQrs = async () => {
-    const mockOutsiders = [
-      { name: 'Guest 1', address: 'Addr 1', university: 'A. University', occupation: 'Visitor', contact: '09123456789' },
-      { name: 'Guest 2', address: '123 Random St', university: 'Random University', occupation: 'Guest', contact: '09987654321' }
-    ];
-    const qrs = await Promise.all(mockOutsiders.map(async (o) => {
-      const qr = await QRCode.toDataURL(JSON.stringify(o));
-      return { qr, info: o };
-    }));
-    setOutsiderQrs(qrs);
-  };
 
   const handleGoogleLogin = async () => {
     setLoginError('');
@@ -1250,8 +1237,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
       const result = await signInWithPopup(auth, provider);
       const userEmail = result.user.email || '';
       
-      // Check if user is in ADMINS list or has admin role in Firestore
-      const isAdminEmail = ADMINS.includes(userEmail);
+      // Check if user is in ADMINS list, OWNERS list, or has admin role in Firestore
+      const isAdminEmail = ADMINS.includes(userEmail) || OWNERS.includes(userEmail);
       const userDoc = await getDoc(doc(db, 'users', result.user.uid));
       const hasAdminRole = userDoc.exists() && userDoc.data().role === 'admin';
       
@@ -1471,17 +1458,6 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
             )}
           >
             Logs
-          </button>
-          <button
-            onClick={() => setActiveTab('qrs')}
-            className={cn(
-              "px-4 py-1.5 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500",
-              activeTab === 'qrs' 
-                ? (isDarkMode ? "bg-white text-black shadow-lg" : "bg-brand-light-primary text-white shadow-lg")
-                : (isDarkMode ? "text-brand-dark-secondary hover:text-brand-dark-primary hover:bg-white/5" : "text-brand-light-secondary hover:text-brand-light-primary hover:bg-black/5")
-            )}
-          >
-            QRs
           </button>
         </div>
         <div className="flex items-center gap-2">
@@ -1818,61 +1794,6 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
             </table>
           </div>
         </div>
-      ) : activeTab === 'qrs' ? (
-        <div className={cn(
-          "backdrop-blur-3xl rounded-[60px] border shadow-2xl p-16 transition-all duration-500",
-          isDarkMode ? "bg-[#2a2a2a]/40 border-white/10" : "bg-white/40 border-black/5"
-        )}>
-          <div className="flex items-center justify-between mb-12">
-            <h3 className={cn(
-              "text-3xl font-black uppercase tracking-tight",
-              isDarkMode ? "text-white" : "text-slate-900"
-            )}>Outsider QR Codes</h3>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-10">
-            {outsiderQrs.map((item, i) => (
-              <div 
-                key={i} 
-                onClick={() => setSelectedVisitor({
-                  id: `guest-${i}`,
-                  name: item.info.name,
-                  type: 'outsider',
-                  identifier: 'N/A',
-                  purpose: 'N/A',
-                  check_in: new Date().toISOString(),
-                  is_blocked: 0,
-                  address: item.info.address,
-                  university: item.info.university,
-                  occupation: item.info.occupation,
-                  contact: item.info.contact
-                })}
-                className={cn(
-                "p-8 rounded-[40px] border flex flex-col items-center gap-6 group hover:scale-105 transition-all duration-500 cursor-pointer",
-                isDarkMode ? "bg-[#2a2a2a]/40 border-white/10" : "bg-white/40 border-black/5"
-              )}>
-                <div className="p-4 bg-white rounded-[24px] shadow-lg">
-                  <img src={item.qr} alt="QR" className="w-full h-full" />
-                </div>
-                <p className={cn(
-                  "text-[11px] font-black uppercase tracking-widest text-center",
-                  isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
-                )}>{item.info.name}</p>
-                {(() => {
-                  const latestSession = visitors.find(v => v.name === item.info.name);
-                  const isLoggedOut = latestSession ? !!latestSession.check_out : true;
-                  return isLoggedOut ? (
-                    <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Logged Out</span>
-                  ) : (
-                    <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500 flex items-center gap-1">
-                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-                      In Library
-                    </span>
-                  );
-                })()}
-              </div>
-            ))}
-          </div>
-        </div>
       ) : null}
 
       {/* Visitor Detail Modal */}
@@ -2089,6 +2010,7 @@ function DetailItem({ label, value, isDarkMode }: { label: string, value: string
                 </div>
                 <p className="text-[8px] text-slate-400 italic">Toggle your admin status for testing purposes.</p>
                 <div className="mt-2 space-y-1">
+                  <p className="text-[8px] text-brand-light-secondary font-bold">Owner: chynna.cardona@neu.edu.ph</p>
                   <p className="text-[8px] text-brand-light-secondary font-bold">Owner: jcesperanza@neu.edu.ph</p>
                   <p className="text-[8px] text-brand-light-secondary font-bold">Owner: cardonachynnam@gmail.com</p>
                 </div>
