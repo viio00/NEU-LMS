@@ -559,6 +559,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
 }) {
   const [idInput, setIdInput] = useState('');
   const [isOutsider, setIsOutsider] = useState(false);
+  const [qrMode, setQrMode] = useState<'in' | 'out'>('in');
   const [outsiderForm, setOutsiderForm] = useState({
     name: '',
     university: '',
@@ -597,11 +598,17 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
         if (code) {
           try {
             const data = JSON.parse(code.data);
-            if (data.name === 'Guest 1' || data.name === 'Guest 2') {
-              onNext(data.name, 'outsider', data);
+            if (qrMode === 'out') {
+              onCheckOut(data.identifier || data.name);
             } else {
-              setOutsiderForm(data);
-              setIsOutsider(true);
+              if (data.name === 'Guest 1' || data.name === 'Guest 2') {
+                onNext(data.name, 'outsider', { ...data, identifier: data.name });
+              } else if (data.type === 'outsider') {
+                onNext(data.identifier || data.name, 'outsider', data);
+              } else {
+                setOutsiderForm(data);
+                setIsOutsider(true);
+              }
             }
           } catch {
             alert("Invalid QR Code format. Please use the outsider form or a valid NEU QR.");
@@ -669,32 +676,48 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <button
-                disabled={!validateId(idInput) || isProcessing}
-                onClick={() => onNext(idInput, 'student')}
-                className={cn(
-                  "py-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-lg transition-all duration-500",
-                  isDarkMode
-                    ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-                    : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
-                )}
-              >
-                {isProcessing ? "..." : "Check In"}
-              </button>
-              <button
-                disabled={!validateId(idInput) || isProcessing}
-                onClick={() => onCheckOut(idInput)}
-                className={cn(
-                  "py-4 rounded-xl font-black uppercase tracking-widest text-xs shadow-lg transition-all duration-500",
-                  isDarkMode
-                    ? "bg-slate-600 text-white hover:bg-slate-500 disabled:opacity-50"
-                    : "bg-slate-500 text-white hover:bg-slate-400 disabled:opacity-50"
-                )}
-              >
-                {isProcessing ? "..." : "Check Out"}
-              </button>
-            </div>
+              <div className="grid grid-cols-3 gap-3">
+                <button
+                  disabled={!validateId(idInput) || isProcessing}
+                  onClick={() => onNext(idInput, 'student')}
+                  className={cn(
+                    "col-span-1 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                    isDarkMode
+                      ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
+                      : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
+                  )}
+                >
+                  {isProcessing ? "..." : "Check In"}
+                </button>
+                <button
+                  disabled={!validateId(idInput) || isProcessing}
+                  onClick={() => onCheckOut(idInput)}
+                  className={cn(
+                    "col-span-1 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                    isDarkMode
+                      ? "bg-slate-600 text-white hover:bg-slate-500 disabled:opacity-50"
+                      : "bg-slate-500 text-white hover:bg-slate-400 disabled:opacity-50"
+                  )}
+                >
+                  {isProcessing ? "..." : "Check Out"}
+                </button>
+                <button
+                  disabled={isProcessing}
+                  onClick={() => {
+                    setQrMode('out');
+                    fileInputRef.current?.click();
+                  }}
+                  className={cn(
+                    "col-span-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500 flex flex-col items-center justify-center gap-1",
+                    isDarkMode
+                      ? "bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-50"
+                      : "bg-orange-500 text-white hover:bg-orange-400 disabled:opacity-50"
+                  )}
+                >
+                  <QrCode size={14} />
+                  Out-QR
+                </button>
+              </div>
 
             <div className="relative py-4 flex items-center justify-center">
               <div className={cn("absolute w-full h-[1px]", isDarkMode ? "bg-white/10" : "bg-black/10")} />
@@ -743,10 +766,22 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                 </button>
                 <div className="absolute top-full left-0 w-full mt-2 rounded-xl border bg-[#1A1C1E] border-white/10 shadow-xl z-50 overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                   <button
-                    onClick={() => fileInputRef.current?.click()}
+                    onClick={() => {
+                      setQrMode('in');
+                      fileInputRef.current?.click();
+                    }}
                     className="w-full py-2 px-3 text-left text-[10px] font-black uppercase tracking-widest text-white/80 hover:bg-white/5 transition-colors"
                   >
-                    Scan QR
+                    Scan QR - In
+                  </button>
+                  <button
+                    onClick={() => {
+                      setQrMode('out');
+                      fileInputRef.current?.click();
+                    }}
+                    className="w-full py-2 px-3 text-left text-[10px] font-black uppercase tracking-widest text-white/80 hover:bg-white/5 transition-colors"
+                  >
+                    Scan QR - Out
                   </button>
                   <button
                     onClick={() => setIsOutsider(true)}
@@ -985,6 +1020,20 @@ function PurposeStep({ visitorName, onNext, onBack, isProcessing, isDarkMode }: 
 
 function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: () => void, isDarkMode: boolean }) {
   const isCheckOut = !!data.check_out;
+  const [qrUrl, setQrUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!isCheckOut && data.type === 'outsider') {
+      const qrData = JSON.stringify({
+        identifier: data.identifier,
+        name: data.name,
+        type: 'outsider'
+      });
+      QRCode.toDataURL(qrData, { width: 400, margin: 2 }, (err, url) => {
+        if (!err) setQrUrl(url);
+      });
+    }
+  }, [data, isCheckOut]);
 
   return (
     <motion.div 
@@ -1022,6 +1071,23 @@ function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: ()
         )}>
           {isCheckOut ? "Thank you for visiting the NEU Library!" : "Welcome! Please observe library protocols."}
         </p>
+
+        {qrUrl && !isCheckOut && (
+          <div className="mb-8 space-y-4">
+            <div className={cn(
+              "p-4 rounded-[32px] border shadow-2xl bg-white",
+              isDarkMode ? "border-white/10" : "border-black/5"
+            )}>
+              <img src={qrUrl} alt="Visitor QR" className="w-48 h-48 mx-auto" />
+            </div>
+            <p className={cn(
+              "text-[9px] font-black uppercase tracking-widest",
+              isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
+            )}>
+              Please take a photo of this QR for Check-out
+            </p>
+          </div>
+        )}
 
         <div className={cn(
           "w-full rounded-[24px] p-6 mb-8 text-left space-y-4 border shadow-2xl backdrop-blur-xl",
@@ -1789,6 +1855,18 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                   "text-[11px] font-black uppercase tracking-widest text-center",
                   isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
                 )}>{item.info.name}</p>
+                {(() => {
+                  const latestSession = visitors.find(v => v.name === item.info.name);
+                  const isLoggedOut = latestSession ? !!latestSession.check_out : true;
+                  return isLoggedOut ? (
+                    <span className="text-[8px] font-black uppercase tracking-widest text-slate-500">Logged Out</span>
+                  ) : (
+                    <span className="text-[8px] font-black uppercase tracking-widest text-emerald-500 flex items-center gap-1">
+                      <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
+                      In Library
+                    </span>
+                  );
+                })()}
               </div>
             ))}
           </div>
