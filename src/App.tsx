@@ -560,6 +560,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
   const [idInput, setIdInput] = useState('');
   const [isOutsider, setIsOutsider] = useState(false);
   const [qrMode, setQrMode] = useState<'in' | 'out'>('in');
+  const qrModeRef = useRef<'in' | 'out'>('in');
   const [outsiderForm, setOutsiderForm] = useState({
     name: '',
     university: '',
@@ -598,7 +599,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
         if (code) {
           try {
             const data = JSON.parse(code.data);
-            if (qrMode === 'out') {
+            if (qrModeRef.current === 'out') {
               onCheckOut(data.identifier || data.name);
             } else {
               if (data.name === 'Guest 1' || data.name === 'Guest 2') {
@@ -676,12 +677,12 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
               />
             </div>
 
-              <div className="grid grid-cols-3 gap-3">
+              <div className="flex gap-3 h-14">
                 <button
                   disabled={!validateId(idInput) || isProcessing}
                   onClick={() => onNext(idInput, 'student')}
                   className={cn(
-                    "col-span-1 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                    "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
                     isDarkMode
                       ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
                       : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
@@ -693,7 +694,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                   disabled={!validateId(idInput) || isProcessing}
                   onClick={() => onCheckOut(idInput)}
                   className={cn(
-                    "col-span-1 py-4 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                    "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
                     isDarkMode
                       ? "bg-slate-600 text-white hover:bg-slate-500 disabled:opacity-50"
                       : "bg-slate-500 text-white hover:bg-slate-400 disabled:opacity-50"
@@ -704,14 +705,13 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                 <button
                   disabled={isProcessing}
                   onClick={() => {
+                    qrModeRef.current = 'out';
                     setQrMode('out');
                     fileInputRef.current?.click();
                   }}
                   className={cn(
-                    "col-span-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500 flex flex-col items-center justify-center gap-1",
-                    isDarkMode
-                      ? "bg-orange-600 text-white hover:bg-orange-500 disabled:opacity-50"
-                      : "bg-orange-500 text-white hover:bg-orange-400 disabled:opacity-50"
+                    "aspect-square h-full rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500 flex flex-col items-center justify-center gap-1",
+                    "bg-white text-brand-light-primary hover:bg-slate-100 disabled:opacity-50"
                   )}
                 >
                   <QrCode size={14} />
@@ -767,6 +767,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                 <div className="absolute top-full left-0 w-full mt-2 rounded-xl border bg-[#1A1C1E] border-white/10 shadow-xl z-50 overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
                   <button
                     onClick={() => {
+                      qrModeRef.current = 'in';
                       setQrMode('in');
                       fileInputRef.current?.click();
                     }}
@@ -776,6 +777,7 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                   </button>
                   <button
                     onClick={() => {
+                      qrModeRef.current = 'out';
                       setQrMode('out');
                       fileInputRef.current?.click();
                     }}
