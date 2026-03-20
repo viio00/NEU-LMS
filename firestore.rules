@@ -17,7 +17,6 @@ service cloud.firestore {
     //   - contact: string
     //   - purpose: string (required)
     //   - check_in: string (required, ISO8601)
-    //   - check_out: string (ISO8601)
     //   - is_blocked: int
     //
     // Collection: members
@@ -43,24 +42,19 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         ((request.auth.token.email == "chynna.cardona@neu.edu.ph") ||
-         (request.auth.token.email == "jcesperanza@neu.edu.ph") ||
-         (request.auth.token.email == "cardonachynnam@gmail.com") ||
-         (request.auth.token.email == "admin1@neu.edu.ph") ||
-         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin'));
+         (request.auth.token.email == "jcesperanza@neu.edu.ph"));
     }
 
     function isOwner() {
       return isAuthenticated() &&
-        ((request.auth.token.email == "jcesperanza@neu.edu.ph") ||
-         (request.auth.token.email == "cardonachynnam@gmail.com") ||
-         (request.auth.token.email == "chynna.cardona@neu.edu.ph"));
+        ((request.auth.token.email == "chynna.cardona@neu.edu.ph") ||
+         (request.auth.token.email == "jcesperanza@neu.edu.ph"));
     }
 
     function isValidVisitor(data) {
       return data.keys().hasAll(['name', 'type', 'purpose', 'check_in']) &&
              data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
-             data.type in ['student', 'faculty', 'outsider'] &&
+             data.type in ['student', 'faculty', 'outsider', 'Student', 'Faculty', 'Employee', 'Outsider'] &&
              data.purpose is string && data.purpose.size() > 0 && data.purpose.size() < 200 &&
              data.check_in is string && data.check_in.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
     }
@@ -75,13 +69,13 @@ service cloud.firestore {
       // For now, allow create if valid data
       allow create: if isValidVisitor(request.resource.data);
       
-      // Update is for check-out or admin blocking
+      // Update is for admin blocking
       allow update: if (isValidVisitor(request.resource.data) && 
-                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['check_out', 'is_blocked'])) ||
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['is_blocked'])) ||
                        isAdmin() || isOwner();
       
-      // Read is for admins
-      allow read: if isAdmin() || isOwner();
+      // Read and delete are for admins
+      allow read, delete: if isAdmin() || isOwner();
     }
 
     match /members/{memberId} {
@@ -95,7 +89,10 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read, write: if request.auth.uid == userId || isAdmin() || isOwner();
+      allow read: if request.auth.uid == userId || isAdmin() || isOwner();
+      allow create: if (request.auth.uid == userId && (!('role' in request.resource.data) || request.resource.data.role != 'admin')) || isAdmin() || isOwner();
+      allow update: if (request.auth.uid == userId && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role)) || isAdmin() || isOwner();
+      allow delete: if isAdmin() || isOwner();
     }
   }
 }

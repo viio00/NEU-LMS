@@ -15,7 +15,6 @@
         "contact": { "type": "string" },
         "purpose": { "type": "string" },
         "check_in": { "type": "string", "format": "date-time" },
-        "check_out": { "type": "string", "format": "date-time" },
         "is_blocked": { "type": "integer" }
       },
       "required": ["name", "type", "purpose", "check_in"]

@@ -1,47 +1,32 @@
-# NEU Library Visitor Management System
+# NEU Library Visitor Kiosk
 
-A professional full-stack application for managing library visitor sessions with QR code support, real-time analytics, and a comprehensive admin dashboard.
+A modern, secure, and responsive visitor management system designed for the New Era University (NEU) Library. This application streamlines the check-in process for students, faculty, and outside visitors while providing a comprehensive, real-time analytics dashboard for library administrators.
 
-## 🚀 Live Application
+## 🚀 Production Link
 
-- **Development Environment:** [https://ais-dev-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app](https://ais-dev-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app)
-- **Production (Shared) Environment:** [https://ais-pre-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app](https://ais-pre-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app)
+**Live Application:** [NEU Library Visitor Kiosk](https://ais-pre-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app)
 
 ## ✨ Key Features
 
-- **Flexible Check-in Methods:** Support for both Student/Faculty ID and Email-based identification.
-- **QR Code Integration:** Instant check-out by scanning generated visitor QR codes.
-- **Real-time Analytics:** Live dashboard showing visitor traffic, purpose distribution, and average stay duration.
-- **Comprehensive Admin Portal:** Secure access via Google Authentication to manage logs and system settings.
-- **Activity Logs & Reporting:** Searchable history with the ability to export detailed reports as PDF.
-- **Security & Access Control:** Integrated blocking system to manage restricted identifiers.
-- **Modern UI/UX:** High-performance interface built with Tailwind CSS and Framer Motion, optimized for kiosk use.
+* **Multi-Role Check-In System:** Tailored check-in flows for Students, Faculty/Employees, and Outsiders.
+* **Secure Admin Portal:** A protected dashboard restricted exclusively to authorized NEU library administrators (`chynna.cardona@neu.edu.ph` and `jcesperanza@neu.edu.ph`).
+* **Real-Time Analytics Dashboard:** Live statistics on total visitors, peak hours, daily trends, and purpose-of-visit breakdowns.
+* **Institutional Email Verification:** Integrated Google Workspace OAuth to ensure only valid NEU accounts can access restricted areas.
+* **Advanced Access Control:** Custom "Access Denied" modals and strict Firestore security rules to prevent unauthorized privilege escalation.
+* **Modern, Animated UI:** A sleek, glassmorphism-inspired interface with smooth transitions and responsive design for kiosk displays.
 
 ## 🛠️ Development Stack
 
-- **Frontend:** React 18, TypeScript, Tailwind CSS, Framer Motion, Lucide React.
-- **Backend:** Express.js (Node.js).
-- **Database:** Firebase Firestore (NoSQL).
-- **Authentication:** Firebase Authentication (Google OAuth).
-- **Libraries:** 
-  - `jsPDF` & `jspdf-autotable` for report generation.
-  - `jsQR` for client-side QR code processing.
-  - `date-fns` for robust date and time handling.
-  - `recharts` for data visualization.
+**Frontend:**
+* [React 18](https://react.dev/) - UI Library
+* [Vite](https://vitejs.dev/) - Build Tool & Development Server
+* [TypeScript](https://www.typescriptlang.org/) - Static Typing
+* [Tailwind CSS](https://tailwindcss.com/) - Utility-first CSS Framework
+* [Framer Motion](https://www.framer.com/motion/) - Animation Library
+* [Lucide React](https://lucide.dev/) - Iconography
+* [date-fns](https://date-fns.org/) - Date & Time Formatting
 
-## 📦 Setup Instructions
-
-1. **Download/Extract the files** into a folder on your computer.
-2. **Open the folder in VS Code**.
-3. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-4. **Start the Development Server**:
-   ```bash
-   npm run dev
-   ```
-5. **Open the App**:
-   Navigate to `http://localhost:3000` in your web browser.
-
-
+**Backend & Infrastructure:**
+* [Firebase Authentication](https://firebase.google.com/docs/auth) - Google OAuth & Identity Management
+* [Cloud Firestore](https://firebase.google.com/docs/firestore) - Real-time NoSQL Database
+* [Firebase Security Rules](https://firebase.google.com/docs/rules) - Backend Access Control & Data Validation

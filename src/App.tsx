@@ -40,7 +40,7 @@ import {
   Pie, 
   Cell 
 } from 'recharts';
-import { format, subDays } from 'date-fns';
+import { format, subDays, isSameDay, startOfWeek, startOfMonth, startOfYear } from 'date-fns';
 import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import autoTable from 'jspdf-autotable';
@@ -134,8 +134,10 @@ type VisitorType = 'student' | 'faculty' | 'outsider';
 interface Visitor {
   id: string | number;
   name: string;
-  type: VisitorType;
+  type: string; // Changed from VisitorType to string to support more roles
   identifier: string;
+  email?: string;
+  photoURL?: string;
   department?: string;
   university?: string;
   occupation?: string;
@@ -143,7 +145,6 @@ interface Visitor {
   contact?: string;
   purpose: string;
   check_in: string;
-  check_out?: string;
   is_blocked: number;
 }
 
@@ -151,28 +152,54 @@ interface Stats {
   totalVisitors: number;
   purposeStats: { purpose: string; count: number }[];
   dailyStats: { date: string; count: number }[];
-  avgDuration: number;
+  avgVisitsPerDay: number;
+  peakHour: string;
 }
 
 // --- Constants ---
 const ADMINS = [
   'chynna.cardona@neu.edu.ph',
-  'jcesperanza@neu.edu.ph',
-  'cardonachynnam@gmail.com',
-  'admin1@neu.edu.ph'
+  'jcesperanza@neu.edu.ph'
 ];
 const OWNERS = [
   'chynna.cardona@neu.edu.ph',
-  'jcesperanza@neu.edu.ph',
-  'cardonachynnam@gmail.com'
+  'jcesperanza@neu.edu.ph'
 ];
 const ADMIN_PASSWORD = 'passW@rd';
+
+const COLLEGES = [
+  'Not Applicable / Outsider',
+  'College of Accountancy',
+  'College of Business Administration',
+  'College of Criminology',
+  'College of Education',
+  'College of Engineering and Architecture',
+  'College of Law',
+  'College of Medical Technology',
+  'College of Midwifery',
+  'College of Arts and Sciences',
+  'College of Nursing',
+  'College of Informatics and Computing Studies',
+  'College of Respiratory Therapy',
+  'College of Physical Therapy',
+  'School of International Relations',
+  'Graduate Studies',
+  'Integrated School'
+];
+
+const ROLES = [
+  'Student',
+  'Faculty',
+  'Employee',
+  'Outsider'
+];
 
 const PURPOSES = [
   'Research/thesis',
   'Study',
   'Use of Computer',
   'Boardgames/pass time',
+  'Seminar/Meeting',
   'Others'
 ];
 
@@ -193,14 +220,13 @@ export function App() {
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
-        setUserEmail(user.email);
-        // Check if user is in ADMINS list or has admin role in Firestore
-        const isAdminEmail = ADMINS.includes(user.email || '');
-        const isOwnerEmail = OWNERS.includes(user.email || '');
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        const hasAdminRole = userDoc.exists() && userDoc.data().role === 'admin';
+        const email = (user.email || '').toLowerCase().trim();
+        setUserEmail(email);
+        // ONLY THE 2 OWNERS are allowed to be admins
+        const isAdminEmail = ADMINS.some(e => e.toLowerCase().trim() === email);
+        const isOwnerEmail = OWNERS.some(e => e.toLowerCase().trim() === email);
         
-        setIsAdminLoggedIn(isAdminEmail || hasAdminRole);
+        setIsAdminLoggedIn(isAdminEmail);
         setIsOwner(isOwnerEmail);
       } else {
         setIsAdminLoggedIn(false);
@@ -233,7 +259,7 @@ export function App() {
         { identifier: '22-22222-222', name: 'Lastname3, Firstname III', type: 'student', department: '1st Year BS Medical Technology', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
         { identifier: '99-99999-999', name: 'Employee 1', type: 'faculty', department: 'CICS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
         { identifier: '77-77777-777', name: 'Employee 2', type: 'faculty', department: 'CAS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
-        { identifier: 'ST-2024-001', name: 'Cardona, Chynna M.', email: 'cardonachynnam@gmail.com', type: 'student', department: 'CICS Department', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
+        { identifier: 'ST-2024-001', name: 'Cardona, Chynna M.', email: 'chynna.cardona@neu.edu.ph', type: 'student', department: 'CICS Department', university: 'New Era University', occupation: 'Student', address: '--', contact: '--' },
         { identifier: 'FC-2024-001', name: 'Esperanza, J.C.', email: 'jcesperanza@neu.edu.ph', type: 'faculty', department: 'CICS Department', university: 'New Era University', occupation: 'Faculty', address: '--', contact: '--' },
       ];
       
@@ -307,7 +333,7 @@ export function App() {
             />
             <div className="text-left">
               <h1 className="text-lg font-black tracking-tight leading-none mb-0.5 text-white">
-                NEU Library System
+                NEU Library Visitor Management
               </h1>
               <p className="text-[8px] font-black uppercase tracking-[0.4em] text-white/50">
                 {format(currentTime, 'MMMM d, yyyy')}
@@ -356,11 +382,11 @@ export function App() {
       )}>
         <AnimatePresence mode="wait">
           {mode === 'visitor' ? (
-            <motion.div key="visitor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div key="visitor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full flex justify-center">
               <VisitorFlow isDarkMode={isDarkMode} />
             </motion.div>
           ) : (
-            <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+            <motion.div key="admin" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="w-full">
               <AdminFlow 
                 isLoggedIn={isAdminLoggedIn} 
                 onLogin={() => setIsAdminLoggedIn(true)} 
@@ -406,30 +432,30 @@ function SplashScreen() {
 }
 
 function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
-  const [step, setStep] = useState<'id' | 'purpose' | 'success' | 'error'>('id');
+  const [step, setStep] = useState<'id' | 'details' | 'purpose' | 'success' | 'error'>('id');
   const [visitorData, setVisitorData] = useState<Partial<Visitor>>({});
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isInstitutional, setIsInstitutional] = useState(false);
 
-  const handleIdSubmit = async (id: string, type: VisitorType, extraData?: any, email?: string) => {
+  const handleIdSubmit = async (id: string, type: string, extraData?: any, email?: string, photoURL?: string, institutional: boolean = false) => {
     setIsProcessing(true);
+    setIsInstitutional(institutional);
     try {
-      let finalId = id;
+      let finalId = id || email || 'GUEST';
       let finalExtra = extraData || {};
+      let searchEmail = email || (id.includes('@') ? id : undefined);
 
       // If email is provided, try to find the member by email first
-      if (email && type !== 'outsider') {
+      if (searchEmail) {
         const membersRef = collection(db, 'members');
-        const qEmail = query(membersRef, where('email', '==', email));
+        const qEmail = query(membersRef, where('email', '==', searchEmail));
         const emailSnap = await getDocs(qEmail);
         
         if (!emailSnap.empty) {
           const memberData = emailSnap.docs[0].data();
           finalId = memberData.identifier;
-          finalExtra = memberData;
-        } else if (!id) {
-          // If only email was provided and not found
-          throw new Error("Email not registered. Please check your email or use your ID.");
+          finalExtra = { ...memberData, ...extraData };
         }
       }
 
@@ -437,40 +463,38 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
       const blockedRef = doc(db, 'blocked', finalId);
       const blockedSnap = await getDoc(blockedRef);
       if (blockedSnap.exists()) {
-        throw new Error("This ID is blocked.");
+        throw new Error("This ID/Account is blocked.");
       }
 
-      // Check if already checked in
-      const qActive = query(
-        collection(db, 'visitors'),
-        where('identifier', '==', finalId),
-        where('check_out', '==', null)
-      );
-      const activeSnap = await getDocs(qActive);
-      
-      // Fallback check for records where check_out might be missing (undefined)
-      const hasActiveSession = !activeSnap.empty || (await (async () => {
-        const qAll = query(collection(db, 'visitors'), where('identifier', '==', finalId));
-        const allSnap = await getDocs(qAll);
-        return allSnap.docs.some(d => !d.data().check_out);
-      })());
+      const dataToSet: any = { 
+        ...finalExtra, 
+        identifier: finalId, 
+        type: finalExtra.type || type || 'Student',
+        name: finalExtra.name || extraData?.name || '',
+        department: type === 'outsider' ? 'Not Applicable / Outsider' : (finalExtra.department || '')
+      };
+      if (email) dataToSet.email = email;
+      if (photoURL) dataToSet.photoURL = photoURL;
+      setVisitorData(dataToSet);
 
-      if (hasActiveSession) {
-        throw new Error("You are currently 'In Library'. Please check out first before checking in again.");
-      }
-
-      if (type !== 'outsider' && !finalExtra.identifier) {
-        const memberRef = doc(db, 'members', finalId);
-        const memberSnap = await getDoc(memberRef);
-        if (memberSnap.exists()) {
-          finalExtra = memberSnap.data();
+      if (type === 'outsider') {
+        if (dataToSet.purpose) {
+          // Handle outsider check-in directly (from form)
+          const finalData = { 
+            ...dataToSet, 
+            check_in: new Date().toISOString(),
+            is_blocked: 0
+          };
+          const docRef = await addDoc(collection(db, 'visitors'), finalData);
+          setVisitorData(prev => ({ ...prev, ...finalData, id: docRef.id as any }));
+          setStep('success');
         } else {
-          throw new Error("Member not found. Please check your ID or Email.");
+          // Skip details, go to purpose
+          setStep('purpose');
         }
+      } else {
+        setStep('details');
       }
-
-      setVisitorData({ ...finalExtra, identifier: finalId, type });
-      setStep('purpose');
     } catch (err: any) {
       setErrorMessage(err.message);
       setStep('error');
@@ -479,151 +503,165 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
     }
   };
 
-  const handlePurposeSubmit = async (purpose: string) => {
+  const handleDetailsSubmit = (dept: string, role: string) => {
+    setVisitorData(prev => ({ ...prev, department: dept, type: role }));
+    setStep('purpose');
+  };
+
+  const handlePurposeSubmit = React.useCallback(async (purpose: string) => {
+    if (isProcessing) return;
     setIsProcessing(true);
+    setErrorMessage('');
     try {
       const finalData = { 
         ...visitorData, 
         purpose,
         check_in: new Date().toISOString(),
-        check_out: null,
         is_blocked: 0
       };
       
       const docRef = await addDoc(collection(db, 'visitors'), finalData);
-      setVisitorData({ ...finalData, id: docRef.id as any });
+      
+      // Update local state with the new ID
+      setVisitorData(prev => ({ ...prev, ...finalData, id: docRef.id as any }));
+      
+      // Transition to success step
       setStep('success');
     } catch (err: any) {
-      handleFirestoreError(err, OperationType.CREATE, 'visitors');
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const handleCheckOut = async (id: string, email?: string) => {
-    setIsProcessing(true);
-    try {
-      let finalId = id;
-
-      // If only email is provided, find the identifier
-      if (email && !id) {
-        const membersRef = collection(db, 'members');
-        const qEmail = query(membersRef, where('email', '==', email));
-        const emailSnap = await getDocs(qEmail);
-        if (!emailSnap.empty) {
-          finalId = emailSnap.docs[0].data().identifier;
-        } else {
-          // If not a member, maybe they checked in as outsider with email?
-          // But outsiders use name/identifier.
-          // Let's check visitors by email
-          const qVisitorEmail = query(
-            collection(db, 'visitors'),
-            where('email', '==', email),
-            where('check_out', '==', null)
-          );
-          const visitorSnap = await getDocs(qVisitorEmail);
-          if (!visitorSnap.empty) {
-            finalId = visitorSnap.docs[0].data().identifier;
-          } else {
-            throw new Error("No active session found for this email.");
-          }
-        }
-      }
-
-      const q = query(
-        collection(db, 'visitors'), 
-        where('identifier', '==', finalId), 
-        where('check_out', '==', null)
-      );
-      const querySnapshot = await getDocs(q);
-      
-      let activeDocId = null;
-
-      if (!querySnapshot.empty) {
-        activeDocId = querySnapshot.docs[0].id;
-      } else {
-        // Fallback for undefined check_out
-        const q2 = query(
-          collection(db, 'visitors'), 
-          where('identifier', '==', finalId)
-        );
-        const snap2 = await getDocs(q2);
-        const active = snap2.docs.find(d => !d.data().check_out);
-        if (active) activeDocId = active.id;
-      }
-
-      if (!activeDocId) throw new Error('No active session found. You might have already checked out.');
-      
-      await updateDoc(doc(db, 'visitors', activeDocId), {
-        check_out: new Date().toISOString()
-      });
-
-      setStep('success');
-      setVisitorData({ ...visitorData, check_out: new Date().toISOString() });
-    } catch (err: any) {
-      setErrorMessage(err.message);
+      console.error("VisitorFlow: Error in handlePurposeSubmit:", err);
+      setErrorMessage(err.message || "Failed to complete check-in. Please try again.");
       setStep('error');
     } finally {
       setIsProcessing(false);
     }
-  };
+  }, [visitorData, isProcessing]);
+
+  const handleReset = React.useCallback(() => {
+    setStep('id');
+    setVisitorData({});
+    setIsInstitutional(false);
+  }, []);
 
   return (
     <div className="w-full max-w-2xl">
-      {step === 'id' && (
-        <IdEntryStep 
-          onNext={handleIdSubmit} 
-          onCheckOut={handleCheckOut} 
-          isDarkMode={isDarkMode} 
-          isProcessing={isProcessing}
-        />
-      )}
-      {step === 'purpose' && (
-        <PurposeStep 
-          visitorName={visitorData.name || 'Guest'}
-          onNext={handlePurposeSubmit} 
-          onBack={() => setStep('id')} 
-          isProcessing={isProcessing}
-          isDarkMode={isDarkMode}
-        />
-      )}
-      {step === 'success' && (
-        <SuccessStep data={visitorData as Visitor} onReset={() => setStep('id')} isDarkMode={isDarkMode} />
-      )}
-      {step === 'error' && (
-        <ErrorStep message={errorMessage} onReset={() => setStep('id')} isDarkMode={isDarkMode} />
-      )}
+      <AnimatePresence mode="wait">
+        {step === 'id' && (
+          <motion.div
+            key="id-step"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <IdEntryStep 
+              onNext={handleIdSubmit} 
+              isDarkMode={isDarkMode} 
+              isProcessing={isProcessing}
+            />
+          </motion.div>
+        )}
+        {step === 'details' && (
+          <motion.div
+            key="details-step"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <DetailsStep
+              onNext={handleDetailsSubmit}
+              onBack={() => setStep('id')}
+              isDarkMode={isDarkMode}
+              isInstitutional={isInstitutional}
+            />
+          </motion.div>
+        )}
+        {step === 'purpose' && (
+          <motion.div
+            key="purpose-step"
+            initial={{ opacity: 0, x: -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <PurposeStep 
+              visitorName={visitorData.name || visitorData.email || 'Guest'}
+              onNext={handlePurposeSubmit} 
+              onBack={() => setStep('details')} 
+              isProcessing={isProcessing}
+              isDarkMode={isDarkMode}
+            />
+          </motion.div>
+        )}
+        {step === 'success' && (
+          <motion.div
+            key="success-step"
+            initial={{ opacity: 0, scale: 0.9 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 1.1 }}
+            transition={{ duration: 0.5 }}
+          >
+            <SuccessStep data={visitorData as Visitor} onReset={handleReset} isDarkMode={isDarkMode} />
+          </motion.div>
+        )}
+        {step === 'error' && (
+          <motion.div
+            key="error-step"
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            transition={{ duration: 0.3 }}
+          >
+            <ErrorStep message={errorMessage} onReset={() => setStep('id')} isDarkMode={isDarkMode} />
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
 
-function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: { 
-  onNext: (id: string, type: VisitorType, extra?: any, email?: string) => void,
-  onCheckOut: (id: string, email?: string) => void,
+function IdEntryStep({ onNext, isDarkMode, isProcessing }: { 
+  onNext: (id: string, type: string, extra?: any, email?: string, photoURL?: string, institutional?: boolean) => void,
   isDarkMode: boolean,
   isProcessing: boolean
 }) {
   const [idInput, setIdInput] = useState('');
-  const [emailInput, setEmailInput] = useState('');
   const [isOutsider, setIsOutsider] = useState(false);
   const [qrMode, setQrMode] = useState<'in' | 'out'>('in');
   const qrModeRef = useRef<'in' | 'out'>('in');
   const [outsiderForm, setOutsiderForm] = useState({
     name: '',
-    university: '',
-    occupation: '',
-    address: '',
-    contact: ''
+    email: '',
+    contact: '',
+    purpose: ''
   });
+  const [showDeniedModal, setShowDeniedModal] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const validateId = (id: string) => {
     const regex = /^\d{2}-\d{5}-\d{3}$/;
-    return regex.test(id) || id.length > 5; // Allow custom IDs like ST-2024-001
+    return regex.test(id) || id.length > 5;
   };
 
-  const validateEmail = (email: string) => {
-    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const handleGoogleLogin = async () => {
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const email = (result.user.email || '').toLowerCase().trim();
+      
+      const isInstitutional = email.endsWith('@neu.edu.ph');
+      
+      if (!isInstitutional) {
+        setShowDeniedModal(true);
+        setIsOutsider(true);
+        await signOut(auth);
+        return;
+      }
+
+      onNext('', 'Student', { name: result.user.displayName }, email, result.user.photoURL || undefined, true);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const handleScanClick = () => {
@@ -650,20 +688,21 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
         if (code) {
           try {
             const data = JSON.parse(code.data);
-            if (qrModeRef.current === 'out') {
-              onCheckOut(data.identifier || data.name);
+            if (data.name === 'Guest 1' || data.name === 'Guest 2') {
+              onNext(data.name, 'outsider', { ...data, identifier: data.name });
+            } else if (data.type === 'outsider') {
+              onNext(data.identifier || data.name, 'outsider', data);
             } else {
-              if (data.name === 'Guest 1' || data.name === 'Guest 2') {
-                onNext(data.name, 'outsider', { ...data, identifier: data.name });
-              } else if (data.type === 'outsider') {
-                onNext(data.identifier || data.name, 'outsider', data);
-              } else {
-                setOutsiderForm(data);
-                setIsOutsider(true);
-              }
+              // If it's a JSON but not an outsider, maybe it's a student with extra data
+              onNext(data.identifier || data.id || '', data.type || 'Student', data);
             }
           } catch {
-            alert("Invalid QR Code format. Please use the outsider form or a valid NEU QR.");
+            // Not a JSON, maybe it's just a plain text ID
+            if (validateId(code.data.trim())) {
+              onNext(code.data.trim(), 'Student');
+            } else {
+              alert("Invalid QR Code format. Please use the outsider form or a valid NEU QR.");
+            }
           }
         } else {
           alert("No QR code found in image.");
@@ -713,95 +752,50 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
               <div className="space-y-2">
                 <label className={cn(
                   "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
-                  isDarkMode ? "text-white/80" : "text-brand-light-primary",
-                  idInput.length > 0 && "opacity-30"
-                )}>Student/Faculty Email</label>
-                <input
-                  type="email"
-                  placeholder="example@neu.edu.ph"
-                  value={emailInput}
-                  disabled={idInput.length > 0}
-                  onChange={(e) => {
-                    setEmailInput(e.target.value);
-                    if (e.target.value.length > 0) setIdInput('');
-                  }}
-                  className={cn(
-                    "w-full px-4 py-3 rounded-2xl text-sm font-bold tracking-widest text-center transition-all duration-500 focus:outline-none focus:ring-4",
-                    isDarkMode 
-                      ? "bg-[#333] border border-white/10 text-white placeholder:text-white/20 focus:ring-white/10 focus:border-white/20" 
-                      : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20",
-                    idInput.length > 0 && "opacity-30 cursor-not-allowed"
-                  )}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <label className={cn(
-                  "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
-                  isDarkMode ? "text-white/80" : "text-brand-light-primary",
-                  emailInput.length > 0 && "opacity-30"
+                  isDarkMode ? "text-white/80" : "text-brand-light-primary"
                 )}>Student/Faculty ID</label>
                 <input
                   type="text"
                   placeholder="00-00000-000"
                   value={idInput}
-                  disabled={emailInput.length > 0}
-                  onChange={(e) => {
-                    setIdInput(e.target.value);
-                    if (e.target.value.length > 0) setEmailInput('');
-                  }}
+                  onChange={(e) => setIdInput(e.target.value)}
                   className={cn(
                     "w-full px-4 py-3 rounded-2xl text-xl font-mono tracking-[0.2em] text-center transition-all duration-500 focus:outline-none focus:ring-4",
                     isDarkMode 
                       ? "bg-[#333] border border-white/10 text-white placeholder:text-white/20 focus:ring-white/10 focus:border-white/20" 
-                      : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20",
-                    emailInput.length > 0 && "opacity-30 cursor-not-allowed"
+                      : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary placeholder:text-black/20 focus:ring-black/10 focus:border-black/20"
                   )}
                 />
               </div>
+
+              <button
+                onClick={handleGoogleLogin}
+                className={cn(
+                  "w-full py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 transition-all duration-300 border shadow-md",
+                  isDarkMode
+                    ? "bg-white text-black hover:bg-slate-100 border-white/10"
+                    : "bg-brand-light-primary text-white hover:bg-opacity-90 border-black/5"
+                )}
+              >
+                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+                Connect with Institutional Email
+              </button>
             </div>
 
-              <div className="flex gap-3 h-14">
-                <button
-                  disabled={(!validateId(idInput) && !validateEmail(emailInput)) || isProcessing}
-                  onClick={() => onNext(idInput, 'student', null, emailInput)}
-                  className={cn(
-                    "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
-                    isDarkMode
-                      ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-                      : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
-                  )}
-                >
-                  {isProcessing ? "..." : "Check In"}
-                </button>
-                <button
-                  disabled={(!validateId(idInput) && !validateEmail(emailInput)) || isProcessing}
-                  onClick={() => onCheckOut(idInput, emailInput)}
-                  className={cn(
-                    "flex-1 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
-                    isDarkMode
-                      ? "bg-slate-600 text-white hover:bg-slate-500 disabled:opacity-50"
-                      : "bg-slate-500 text-white hover:bg-slate-400 disabled:opacity-50"
-                  )}
-                >
-                  {isProcessing ? "..." : "Check Out"}
-                </button>
-                <button
-                  disabled={isProcessing}
-                  onClick={() => {
-                    qrModeRef.current = 'out';
-                    setQrMode('out');
-                    fileInputRef.current?.click();
-                  }}
-                  className={cn(
-                    "aspect-square h-full rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500 flex flex-col items-center justify-center gap-1",
-                    "bg-white text-brand-light-primary hover:bg-slate-100 disabled:opacity-50"
-                  )}
-                >
-                  <QrCode size={14} />
-                  Out-QR
-                </button>
-              </div>
+            <div className="flex gap-3 h-14">
+              <button
+                disabled={!validateId(idInput) || isProcessing}
+                onClick={() => onNext(idInput, 'Student')}
+                className={cn(
+                  "w-full rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                  isDarkMode
+                    ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
+                    : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
+                )}
+              >
+                {isProcessing ? "..." : "Check In"}
+              </button>
+            </div>
 
             <div className="relative py-4 flex items-center justify-center">
               <div className={cn("absolute w-full h-[1px]", isDarkMode ? "bg-white/10" : "bg-black/10")} />
@@ -836,47 +830,18 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                 onChange={handleFileUpload}
                 className="hidden"
               />
-              <div className="relative group">
-                <button
-                  className={cn(
-                    "w-full py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all duration-300 border",
-                    isDarkMode
-                      ? "bg-transparent border-white/10 text-white/80 hover:bg-white/5"
-                      : "bg-transparent border-black/10 text-brand-light-primary hover:bg-black/5"
-                  )}
-                >
-                  <QrCode size={14} />
-                  Scan QR - Outsider
-                </button>
-                <div className="absolute top-full left-0 w-full mt-2 rounded-xl border bg-[#1A1C1E] border-white/10 shadow-xl z-50 overflow-hidden opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200">
-                  <button
-                    onClick={() => {
-                      qrModeRef.current = 'in';
-                      setQrMode('in');
-                      fileInputRef.current?.click();
-                    }}
-                    className="w-full py-2 px-3 text-left text-[10px] font-black uppercase tracking-widest text-white/80 hover:bg-white/5 transition-colors"
-                  >
-                    Scan QR - In
-                  </button>
-                  <button
-                    onClick={() => {
-                      qrModeRef.current = 'out';
-                      setQrMode('out');
-                      fileInputRef.current?.click();
-                    }}
-                    className="w-full py-2 px-3 text-left text-[10px] font-black uppercase tracking-widest text-white/80 hover:bg-white/5 transition-colors"
-                  >
-                    Scan QR - Out
-                  </button>
-                  <button
-                    onClick={() => setIsOutsider(true)}
-                    className="w-full py-2 px-3 text-left text-[10px] font-black uppercase tracking-widest text-white/80 hover:bg-white/5 transition-colors"
-                  >
-                    Proceed to Form
-                  </button>
-                </div>
-              </div>
+              <button
+                onClick={() => setIsOutsider(true)}
+                className={cn(
+                  "w-full py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all duration-300 border",
+                  isDarkMode
+                    ? "bg-transparent border-white/10 text-white/80 hover:bg-white/5"
+                    : "bg-transparent border-black/10 text-brand-light-primary hover:bg-black/5"
+                )}
+              >
+                <Users size={14} />
+                Outsider
+              </button>
             </div>
           </div>
         ) : (
@@ -916,62 +881,23 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                   placeholder="Enter your full name"
                 />
               </div>
-              
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1">
-                  <label className={cn(
-                    "text-[9px] font-black uppercase tracking-[0.3em] ml-4",
-                    isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
-                  )}>University</label>
-                  <input 
-                    type="text" 
-                    value={outsiderForm.university}
-                    onChange={e => setOutsiderForm({...outsiderForm, university: e.target.value})}
-                    className={cn(
-                      "w-full px-4 py-2 rounded-xl text-sm transition-all duration-500 focus:outline-none focus:ring-4",
-                      isDarkMode 
-                        ? "bg-white/5 border-2 border-white/10 text-brand-dark-primary placeholder:text-white/5 focus:ring-white/5 focus:border-white/20" 
-                        : "bg-black/5 border-2 border-black/5 text-brand-light-primary placeholder:text-black/5 focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
-                    )}
-                    placeholder="School/Org"
-                  />
-                </div>
-                <div className="space-y-1">
-                  <label className={cn(
-                    "text-[9px] font-black uppercase tracking-[0.3em] ml-4",
-                    isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
-                  )}>Occupation</label>
-                  <input 
-                    type="text" 
-                    value={outsiderForm.occupation}
-                    onChange={e => setOutsiderForm({...outsiderForm, occupation: e.target.value})}
-                    className={cn(
-                      "w-full px-4 py-2 rounded-xl text-sm transition-all duration-500 focus:outline-none focus:ring-4",
-                      isDarkMode 
-                        ? "bg-white/5 border-2 border-white/10 text-brand-dark-primary placeholder:text-white/5 focus:ring-white/5 focus:border-white/20" 
-                        : "bg-black/5 border-2 border-black/5 text-brand-light-primary placeholder:text-black/5 focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
-                    )}
-                    placeholder="Job Title"
-                  />
-                </div>
-              </div>
 
               <div className="space-y-1">
                 <label className={cn(
                   "text-[9px] font-black uppercase tracking-[0.3em] ml-4",
                   isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
-                )}>Address</label>
+                )}>Email Address</label>
                 <input 
                   type="text" 
-                  value={outsiderForm.address}
-                  onChange={e => setOutsiderForm({...outsiderForm, address: e.target.value})}
+                  value={outsiderForm.email}
+                  onChange={e => setOutsiderForm({...outsiderForm, email: e.target.value})}
                   className={cn(
                     "w-full px-4 py-2 rounded-xl text-sm transition-all duration-500 focus:outline-none focus:ring-4",
                     isDarkMode 
                       ? "bg-white/5 border-2 border-white/10 text-brand-dark-primary placeholder:text-white/5 focus:ring-white/5 focus:border-white/20" 
                       : "bg-black/5 border-2 border-black/5 text-brand-light-primary placeholder:text-black/5 focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
                   )}
-                  placeholder="City, Province"
+                  placeholder="Enter your email"
                 />
               </div>
 
@@ -994,9 +920,33 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
                 />
               </div>
 
+              <div className="space-y-1">
+                <label className={cn(
+                  "text-[9px] font-black uppercase tracking-[0.3em] ml-4",
+                  isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
+                )}>Purpose of Visit</label>
+                <select
+                  value={outsiderForm.purpose}
+                  onChange={e => setOutsiderForm({...outsiderForm, purpose: e.target.value})}
+                  className={cn(
+                    "w-full px-4 py-2 rounded-xl text-sm transition-all duration-500 focus:outline-none focus:ring-4 appearance-none cursor-pointer",
+                    isDarkMode 
+                      ? "bg-white/5 border-2 border-white/10 text-brand-dark-primary focus:ring-white/5 focus:border-white/20" 
+                      : "bg-black/5 border-2 border-black/5 text-brand-light-primary focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
+                  )}
+                >
+                  <option value="" className="bg-brand-dark-bg">Select Purpose</option>
+                  {PURPOSES.map(p => (
+                    <option key={p} value={p} className="bg-brand-dark-bg">{p}</option>
+                  ))}
+                </select>
+              </div>
+
               <button
-                disabled={!outsiderForm.name || !outsiderForm.contact || isProcessing}
-                onClick={() => onNext(outsiderForm.name, 'outsider', outsiderForm)}
+                disabled={!outsiderForm.name || !outsiderForm.email || !outsiderForm.contact || !outsiderForm.purpose || isProcessing}
+                onClick={() => {
+                  onNext('', 'outsider', outsiderForm, outsiderForm.email);
+                }}
                 className={cn(
                   "w-full py-3 mt-2 rounded-xl font-black uppercase tracking-widest text-[10px] shadow-2xl transition-all duration-500",
                   isDarkMode
@@ -1009,6 +959,150 @@ function IdEntryStep({ onNext, onCheckOut, isDarkMode, isProcessing }: {
             </div>
           </div>
         )}
+      </div>
+
+      {showDeniedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={cn(
+              "w-full max-w-sm p-6 rounded-3xl shadow-2xl border text-center",
+              isDarkMode ? "bg-[#1a1a1a] border-white/10" : "bg-white border-black/5"
+            )}
+          >
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className={cn(
+              "text-xl font-black uppercase tracking-tight mb-2",
+              isDarkMode ? "text-white" : "text-brand-light-primary"
+            )}>Access Denied</h3>
+            <p className={cn(
+              "text-sm mb-6",
+              isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
+            )}>
+              Only @neu.edu.ph emails are allowed for institutional login. Please fill up the outsider form instead.
+            </p>
+            <button
+              onClick={() => setShowDeniedModal(false)}
+              className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-[10px] bg-red-500 text-white hover:bg-red-600 transition-colors"
+            >
+              Continue to Outsider Form
+            </button>
+          </motion.div>
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
+function DetailsStep({ onNext, onBack, isDarkMode, isInstitutional }: { 
+  onNext: (dept: string, role: string) => void, 
+  onBack: () => void,
+  isDarkMode: boolean,
+  isInstitutional?: boolean
+}) {
+  const [dept, setDept] = useState('');
+  const [role, setRole] = useState('');
+
+  const filteredRoles = isInstitutional ? ROLES.filter(r => r !== 'Outsider') : ROLES;
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="w-full max-w-xl mx-auto"
+    >
+      <div className={cn(
+        "backdrop-blur-3xl rounded-[32px] shadow-2xl border p-6 flex flex-col transition-all duration-500",
+        isDarkMode 
+          ? "bg-[#2a2a2a]/40 border-white/10" 
+          : "bg-white/40 border-black/5"
+      )}>
+        <div className="flex items-center gap-4 mb-4">
+          <button 
+            onClick={onBack} 
+            className={cn(
+              "p-2 rounded-full transition-all duration-500 shadow-xl",
+              isDarkMode ? "bg-white/10 text-white hover:bg-white/20" : "bg-black/5 text-brand-light-primary hover:bg-black/10"
+            )}
+          >
+            <ArrowLeft size={16} />
+          </button>
+          <div>
+            <h2 className={cn(
+              "text-xl font-black uppercase tracking-tighter leading-none mb-1",
+              isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary"
+            )}>Additional Details</h2>
+            <p className={cn(
+              "font-black uppercase tracking-[0.4em] text-[9px]",
+              isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
+            )}>Please provide your department and role</p>
+          </div>
+        </div>
+
+        <div className={cn("w-full h-[1px] mb-6", isDarkMode ? "bg-white/10" : "bg-black/5")} />
+
+        <div className="space-y-6">
+          <div className="space-y-2">
+            <label className={cn(
+              "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
+              isDarkMode ? "text-white/80" : "text-brand-light-primary"
+            )}>Department / College</label>
+            <select
+              value={dept}
+              onChange={(e) => setDept(e.target.value)}
+              className={cn(
+                "w-full px-4 py-3 rounded-2xl text-sm font-black transition-all duration-500 focus:outline-none focus:ring-4 appearance-none cursor-pointer",
+                isDarkMode 
+                  ? "bg-[#333] border border-white/10 text-white focus:ring-white/10 focus:border-white/20" 
+                  : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary focus:ring-black/10 focus:border-black/20"
+              )}
+            >
+              <option value="">Select Department</option>
+              {COLLEGES.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          </div>
+
+          <div className="space-y-2">
+            <label className={cn(
+              "text-[9px] font-black uppercase tracking-[0.2em] ml-2",
+              isDarkMode ? "text-white/80" : "text-brand-light-primary"
+            )}>Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value)}
+              className={cn(
+                "w-full px-4 py-3 rounded-2xl text-sm font-black transition-all duration-500 focus:outline-none focus:ring-4 appearance-none cursor-pointer",
+                isDarkMode 
+                  ? "bg-[#333] border border-white/10 text-white focus:ring-white/10 focus:border-white/20" 
+                  : "bg-[#e2e8f0] border border-black/5 text-brand-light-primary focus:ring-black/10 focus:border-black/20"
+              )}
+            >
+              <option value="">Select Role</option>
+              {filteredRoles.map(r => (
+                <option key={r} value={r}>{r}</option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            disabled={!dept || !role}
+            onClick={() => onNext(dept, role)}
+            className={cn(
+              "w-full py-4 rounded-[16px] font-black uppercase tracking-widest text-xs shadow-2xl transition-all duration-500 flex items-center justify-center gap-3",
+              isDarkMode
+                ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
+                : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
+            )}
+          >
+            Continue
+            <ChevronRight size={16} />
+          </button>
+        </div>
       </div>
     </motion.div>
   );
@@ -1105,60 +1199,68 @@ function PurposeStep({ visitorName, onNext, onBack, isProcessing, isDarkMode }: 
 }
 
 function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: () => void, isDarkMode: boolean }) {
-  const isCheckOut = !!data.check_out;
   const [qrUrl, setQrUrl] = useState<string | null>(null);
+  console.log("SuccessStep: Rendering with data", data);
 
   useEffect(() => {
-    if (!isCheckOut && data.type === 'outsider') {
-      const qrData = JSON.stringify({
-        identifier: data.identifier,
-        name: data.name,
-        type: 'outsider'
-      });
-      QRCode.toDataURL(qrData, { width: 400, margin: 2 }, (err, url) => {
-        if (!err) setQrUrl(url);
-      });
-    }
-  }, [data, isCheckOut]);
+    // QR Code generation removed as it was for check-out
+  }, [data]);
+
+  // Auto-reset after 10 seconds
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      onReset();
+    }, 10000);
+    return () => {
+      clearTimeout(timer);
+    };
+  }, [onReset]);
 
   return (
-    <motion.div 
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      className="w-full max-w-xl mx-auto"
-    >
+    <div className="w-full max-w-xl mx-auto">
       <div className={cn(
         "backdrop-blur-3xl rounded-[40px] shadow-2xl border p-10 flex flex-col items-center text-center transition-all duration-500",
         isDarkMode 
           ? "bg-[#2a2a2a]/40 border-white/10" 
           : "bg-white/40 border-black/5"
       )}>
-        <motion.div 
-          initial={{ scale: 0 }}
-          animate={{ scale: 1 }}
-          transition={{ type: 'spring', damping: 12, stiffness: 200, delay: 0.2 }}
-          className={cn(
-            "w-24 h-24 rounded-full flex items-center justify-center mb-8 shadow-2xl",
-            isCheckOut ? "bg-orange-500" : "bg-green-500"
-          )}
-        >
-          <CheckCircle2 size={48} className="text-white" />
-        </motion.div>
+        {data.photoURL ? (
+          <motion.img 
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', damping: 12, stiffness: 200, delay: 0.2 }}
+            src={data.photoURL}
+            alt={data.name}
+            className="w-24 h-24 rounded-full object-cover mb-8 shadow-2xl border-4 border-white/20"
+            referrerPolicy="no-referrer"
+          />
+        ) : (
+          <motion.div 
+            initial={{ scale: 0 }}
+            animate={{ scale: 1 }}
+            transition={{ type: 'spring', damping: 12, stiffness: 200, delay: 0.2 }}
+            className={cn(
+              "w-24 h-24 rounded-full flex items-center justify-center mb-8 shadow-2xl bg-green-500"
+            )}
+          >
+            <CheckCircle2 size={48} className="text-white" />
+          </motion.div>
+        )}
         
         <h2 className={cn(
           "text-4xl font-black mb-4 tracking-tighter uppercase leading-none",
           isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary"
         )}>
-          {isCheckOut ? "CHECKED OUT!" : "CHECKED IN!"}
+          WELCOME!
         </h2>
         <p className={cn(
           "font-black uppercase tracking-[0.4em] text-[10px] mb-8",
           isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
         )}>
-          {isCheckOut ? "Thank you for visiting the NEU Library!" : "Welcome! Please observe library protocols."}
+          Please observe library protocols.
         </p>
 
-        {qrUrl && !isCheckOut && (
+        {qrUrl && (
           <div className="mb-8 space-y-4">
             <div className={cn(
               "p-4 rounded-[32px] border shadow-2xl bg-white",
@@ -1181,16 +1283,20 @@ function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: ()
         )}>
           <div className={cn("flex justify-between items-center border-b pb-4", isDarkMode ? "border-white/10" : "border-black/5")}>
             <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Visitor</span>
-            <span className={cn("text-xl font-black", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.name}</span>
+            <span className={cn("text-xl font-black", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.name || data.email}</span>
           </div>
           <div className={cn("flex justify-between items-center border-b pb-4", isDarkMode ? "border-white/10" : "border-black/5")}>
-            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>ID Number</span>
+            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Purpose</span>
+            <span className={cn("text-xl font-black", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.purpose}</span>
+          </div>
+          <div className={cn("flex justify-between items-center border-b pb-4", isDarkMode ? "border-white/10" : "border-black/5")}>
+            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Email</span>
             <span className={cn("text-xl font-mono font-black tracking-[0.2em]", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.identifier}</span>
           </div>
           <div className="flex justify-between items-center">
-            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Time</span>
+            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Time In</span>
             <span className={cn("text-xl font-black", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>
-              {format(new Date(isCheckOut ? data.check_out! : data.check_in!), 'HH:mm:ss')}
+              {data.check_in ? format(new Date(data.check_in), 'HH:mm:ss') : '--:--:--'}
             </span>
           </div>
         </div>
@@ -1207,7 +1313,7 @@ function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: ()
           Done
         </button>
       </div>
-    </motion.div>
+    </div>
   );
 }
 
@@ -1267,6 +1373,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
   const [purposeFilter, setPurposeFilter] = useState('all');
   const [deptFilter, setDeptFilter] = useState('all');
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
+  const [showDeniedModal, setShowDeniedModal] = useState(false);
+  const [deniedEmail, setDeniedEmail] = useState('');
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -1279,20 +1387,21 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
         const total = visitorData.length;
         const purposes: Record<string, number> = {};
         const daily: Record<string, number> = {};
-        let totalDuration = 0;
-        let checkoutCount = 0;
+        const hourCounts: Record<number, number> = {};
 
         visitorData.forEach(v => {
           purposes[v.purpose] = (purposes[v.purpose] || 0) + 1;
           const date = format(new Date(v.check_in), 'yyyy-MM-dd');
           daily[date] = (daily[date] || 0) + 1;
           
-          if (v.check_out) {
-            const duration = (new Date(v.check_out).getTime() - new Date(v.check_in).getTime()) / (1000 * 60 * 60);
-            totalDuration += duration;
-            checkoutCount++;
-          }
+          const hour = new Date(v.check_in).getHours();
+          hourCounts[hour] = (hourCounts[hour] || 0) + 1;
         });
+
+        const uniqueDays = Object.keys(daily).length;
+        const avgVisitsPerDay = uniqueDays > 0 ? (total / uniqueDays).toFixed(1) : 0;
+        const peakHourVal = Object.entries(hourCounts).sort((a, b) => b[1] - a[1])[0]?.[0];
+        const peakHour = peakHourVal !== undefined ? format(new Date().setHours(Number(peakHourVal), 0, 0, 0), 'HH:00') : 'N/A';
 
         const last7Days = Array.from({ length: 7 }, (_, i) => {
           const d = format(subDays(new Date(), i), 'yyyy-MM-dd');
@@ -1303,7 +1412,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
           totalVisitors: total,
           purposeStats: Object.entries(purposes).map(([purpose, count]) => ({ purpose, count })),
           dailyStats: last7Days,
-          avgDuration: checkoutCount > 0 ? totalDuration / checkoutCount : 0
+          avgVisitsPerDay: Number(avgVisitsPerDay),
+          peakHour
         });
       }, (err) => {
         handleFirestoreError(err, OperationType.LIST, 'visitors');
@@ -1318,17 +1428,16 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     try {
       const provider = new GoogleAuthProvider();
       const result = await signInWithPopup(auth, provider);
-      const userEmail = (result.user.email || '').toLowerCase();
+      const userEmail = (result.user.email || '').toLowerCase().trim();
       
-      // Check if user is in ADMINS list, OWNERS list, or has admin role in Firestore
-      const isAdminEmail = ADMINS.map(e => e.toLowerCase()).includes(userEmail) || 
-                          OWNERS.map(e => e.toLowerCase()).includes(userEmail);
-      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
-      const hasAdminRole = userDoc.exists() && userDoc.data().role === 'admin';
+      // ONLY THE 2 OWNERS are allowed to be admins
+      const isAdminEmail = ADMINS.some(e => e.toLowerCase().trim() === userEmail) || 
+                          OWNERS.some(e => e.toLowerCase().trim() === userEmail);
       
-      if (isAdminEmail || hasAdminRole) {
+      if (isAdminEmail) {
         // If it's a new admin from the list, ensure they have a record in Firestore
-        if (isAdminEmail && !userDoc.exists()) {
+        const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+        if (!userDoc.exists()) {
           await setDoc(doc(db, 'users', result.user.uid), {
             email: userEmail,
             role: 'admin',
@@ -1338,7 +1447,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
         onLogin();
       } else {
         await signOut(auth);
-        setLoginError(`Access denied (${userEmail}). Only authorized administrators can log in.`);
+        setDeniedEmail(userEmail);
+        setShowDeniedModal(true);
       }
     } catch (err: any) {
       setLoginError("Failed to sign in with Google. Please try again.");
@@ -1364,10 +1474,36 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     }
   };
 
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false);
+
+  const handleClearLogs = async () => {
+    setIsProcessing(true);
+    try {
+      const q = query(collection(db, 'visitors'));
+      const snap = await getDocs(q);
+      
+      // Use writeBatch for more reliable bulk deletion
+      const { writeBatch } = await import('firebase/firestore');
+      const batch = writeBatch(db);
+      snap.docs.forEach(d => {
+        batch.delete(d.ref);
+      });
+      await batch.commit();
+      
+      setIsConfirmingClear(false);
+    } catch (err: any) {
+      console.error("AdminFlow: Error clearing logs:", err);
+      handleFirestoreError(err, OperationType.DELETE, 'visitors');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
   const generatePDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(18);
-    doc.text("NEU Library System", 14, 20);
+    doc.text("NEU Library Visitor Management", 14, 20);
     doc.setFontSize(10);
     doc.text(format(new Date(), 'MMMM d, yyyy'), 14, 28);
     
@@ -1376,8 +1512,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
       head: [['Metric', 'Value']],
       body: [
         ['Total Visitors', stats?.totalVisitors || 0],
-        ['Average Stay', `${(stats?.avgDuration || 0).toFixed(1)} hrs`],
-        ['Active Sessions', visitors.filter(v => !v.check_out).length],
+        ['Avg. Visits/Day', stats?.avgVisitsPerDay || 0],
+        ['Peak Hour', stats?.peakHour || 'N/A'],
         ...((stats?.purposeStats || []).map(p => [`Purpose: ${p.purpose}`, p.count]))
       ],
       startY: 35,
@@ -1392,12 +1528,11 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
       v.type,
       v.identifier,
       v.purpose,
-      format(new Date(v.check_in), 'yyyy-MM-dd HH:mm'),
-      v.check_out ? format(new Date(v.check_out), 'yyyy-MM-dd HH:mm') : 'Active'
+      format(new Date(v.check_in), 'yyyy-MM-dd HH:mm')
     ]);
 
     autoTable(doc, {
-      head: [['Name', 'Type', 'ID', 'Purpose', 'Check In', 'Check Out']],
+      head: [['Name', 'Type', 'ID', 'Purpose', 'Check In']],
       body: tableData,
       startY: finalY + 15,
       theme: 'striped',
@@ -1460,7 +1595,7 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                 )}
               >
                 <img src="https://www.google.com/favicon.ico" alt="Google" className="w-5 h-5 group-hover:scale-110 transition-transform" />
-                Sign In with Google
+                Connect with Institutional Email
               </button>
             </div>
 
@@ -1476,13 +1611,47 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
             )}
           </div>
         </div>
+
+        {showDeniedModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={cn(
+                "w-full max-w-sm p-6 rounded-3xl shadow-2xl border text-center",
+                isDarkMode ? "bg-[#1a1a1a] border-white/10" : "bg-white border-black/5"
+              )}
+            >
+              <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
+                <AlertCircle size={32} />
+              </div>
+              <h3 className={cn(
+                "text-xl font-black uppercase tracking-tight mb-2",
+                isDarkMode ? "text-white" : "text-brand-light-primary"
+              )}>Access Denied</h3>
+              <p className={cn(
+                "text-sm mb-6",
+                isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
+              )}>
+                The email <span className="font-bold">{deniedEmail}</span> is not authorized to access the Admin Portal.
+              </p>
+              <button
+                onClick={() => setShowDeniedModal(false)}
+                className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-[10px] bg-red-500 text-white hover:bg-red-600 transition-colors"
+              >
+                Close
+              </button>
+            </motion.div>
+          </div>
+        )}
       </motion.div>
     );
   }
 
   const filteredVisitors = visitors.filter(v => {
-    const matchesSearch = v.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          v.identifier.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (v.name || '').toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          (v.identifier || '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (v.email || '').toLowerCase().includes(searchQuery.toLowerCase());
     
     if (!matchesSearch) return false;
 
@@ -1492,7 +1661,7 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     // Purpose Filter
     if (purposeFilter !== 'all' && v.purpose !== purposeFilter) return false;
     
-    // Department Filter
+    // College/Department Filter
     if (deptFilter !== 'all' && v.department !== deptFilter) return false;
     
     if (logFilter === 'all') return true;
@@ -1501,13 +1670,13 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     const now = new Date();
     
     if (logFilter === 'today') {
-      return format(checkInDate, 'yyyy-MM-dd') === format(now, 'yyyy-MM-dd');
+      return isSameDay(checkInDate, now);
     } else if (logFilter === 'week') {
-      return checkInDate >= subDays(now, 7);
+      return checkInDate >= startOfWeek(now);
     } else if (logFilter === 'month') {
-      return checkInDate >= subDays(now, 30);
+      return checkInDate >= startOfMonth(now);
     } else if (logFilter === 'year') {
-      return checkInDate >= subDays(now, 365);
+      return checkInDate >= startOfYear(now);
     }
     
     return true;
@@ -1545,6 +1714,41 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
           </button>
         </div>
         <div className="flex items-center gap-2">
+          {isConfirmingClear ? (
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleClearLogs}
+                disabled={isProcessing}
+                className={cn(
+                  "px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 bg-red-600 text-white shadow-lg hover:bg-red-700 disabled:opacity-50"
+                )}
+              >
+                {isProcessing ? "Clearing..." : "Confirm Clear"}
+              </button>
+              <button 
+                onClick={() => setIsConfirmingClear(false)}
+                disabled={isProcessing}
+                className={cn(
+                  "px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 bg-gray-500 text-white shadow-lg hover:bg-gray-600 disabled:opacity-50"
+                )}
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button 
+              onClick={() => setIsConfirmingClear(true)}
+              className={cn(
+                "flex items-center gap-2 px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 backdrop-blur-3xl border shadow-lg hover:scale-105 group",
+                isDarkMode 
+                  ? "bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500/20" 
+                  : "bg-red-50 border-red-200 text-red-600 hover:bg-red-100"
+              )}
+            >
+              <X size={14} className="group-hover:rotate-90 transition-transform" />
+              Clear Logs
+            </button>
+          )}
           <button 
             onClick={generatePDF}
             className={cn(
@@ -1577,9 +1781,9 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
           {/* Stats Cards */}
           <div className="lg:col-span-3 grid grid-cols-1 md:grid-cols-4 gap-4">
             <StatCard icon={<Users size={16} />} label="Total Visitors" value={stats?.totalVisitors || 0} isDarkMode={isDarkMode} />
-            <StatCard icon={<Clock size={16} />} label="Avg. Stay" value={`${(stats?.avgDuration || 0).toFixed(1)} hrs`} isDarkMode={isDarkMode} />
+            <StatCard icon={<Calendar size={16} />} label="Avg. Visits/Day" value={stats?.avgVisitsPerDay || 0} isDarkMode={isDarkMode} />
+            <StatCard icon={<Clock size={16} />} label="Peak Hour" value={stats?.peakHour || 'N/A'} isDarkMode={isDarkMode} />
             <StatCard icon={<Calendar size={16} />} label="Today's Count" value={stats?.dailyStats[0]?.count || 0} isDarkMode={isDarkMode} />
-            <StatCard icon={<History size={16} />} label="Active Sessions" value={visitors.filter(v => !v.check_out).length} isDarkMode={isDarkMode} />
           </div>
 
           {/* Charts */}
@@ -1735,10 +1939,10 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                     : "bg-white border-2 border-black/5 text-brand-light-primary focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
                 )}
               >
-                <option value="all">All Types</option>
-                <option value="student">Student</option>
-                <option value="faculty">Faculty</option>
-                <option value="outsider">Guest</option>
+                <option value="all">All Roles</option>
+                {ROLES.map(role => (
+                  <option key={role} value={role.toLowerCase()}>{role}</option>
+                ))}
               </select>
 
               <select
@@ -1767,27 +1971,25 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                     : "bg-white border-2 border-black/5 text-brand-light-primary focus:ring-brand-light-primary/5 focus:border-brand-light-primary/20"
                 )}
               >
-                <option value="all">All Depts</option>
-                {Array.from(new Set(visitors.map(v => v.department))).filter(Boolean).map(d => (
+                <option value="all">All Colleges</option>
+                {COLLEGES.map(d => (
                   <option key={d} value={d}>{d}</option>
                 ))}
               </select>
             </div>
           </div>
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto pb-4">
             <table className="w-full text-left">
               <thead className={cn(
                 "text-[11px] font-black uppercase tracking-[0.3em] border-b",
                 isDarkMode ? "text-brand-dark-secondary border-white/5" : "text-brand-light-secondary border-black/5"
               )}>
                 <tr>
-                  <th className="px-12 py-10">Visitor Profile</th>
-                  <th className="px-12 py-10">Category</th>
-                  <th className="px-12 py-10">Purpose</th>
-                  <th className="px-12 py-10">Check In</th>
-                  <th className="px-12 py-10">Check Out</th>
-                  <th className="px-12 py-10">Current Status</th>
-                  <th className="px-12 py-10">Actions</th>
+                  <th className="px-6 py-10">Visitor Profile</th>
+                  <th className="px-6 py-10">Category</th>
+                  <th className="px-6 py-10">Purpose</th>
+                  <th className="px-6 py-10">Check In</th>
+                  <th className="px-6 py-10 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className={cn(
@@ -1801,18 +2003,26 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                       "transition-all group cursor-pointer",
                       isDarkMode ? "hover:bg-white/5" : "hover:bg-brand-light-secondary/5"
                     )} 
-                    onClick={() => setSelectedVisitor(v)}
                   >
-                    <td className="px-12 py-8">
+                    <td className="px-6 py-8" onClick={() => setSelectedVisitor(v)}>
                       <div className="flex items-center gap-6">
-                        <div className={cn(
-                          "w-16 h-16 rounded-[20px] flex items-center justify-center font-black text-xl shadow-sm group-hover:scale-110 transition-transform",
-                          isDarkMode 
-                            ? "bg-brand-dark-secondary/10 border border-brand-dark-secondary/20 text-brand-dark-primary" 
-                            : "bg-brand-light-secondary/10 border border-brand-light-secondary/20 text-brand-light-primary"
-                        )}>
-                          {v.name.charAt(0)}
-                        </div>
+                        {v.photoURL ? (
+                          <img 
+                            src={v.photoURL} 
+                            alt={v.name} 
+                            className="w-16 h-16 rounded-[20px] object-cover shadow-sm group-hover:scale-110 transition-transform"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className={cn(
+                            "w-16 h-16 rounded-[20px] flex items-center justify-center font-black text-xl shadow-sm group-hover:scale-110 transition-transform",
+                            isDarkMode 
+                              ? "bg-brand-dark-secondary/10 border border-brand-dark-secondary/20 text-brand-dark-primary" 
+                              : "bg-brand-light-secondary/10 border border-brand-light-secondary/20 text-brand-light-primary"
+                          )}>
+                            {(v.name || 'V').charAt(0)}
+                          </div>
+                        )}
                         <div>
                           <p className={cn(
                             "text-lg font-black tracking-tight",
@@ -1821,16 +2031,16 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                           <p className={cn(
                             "text-[11px] font-black tracking-[0.2em] uppercase",
                             isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
-                          )}>{v.identifier}</p>
+                          )}>{v.email || v.identifier}</p>
                         </div>
                       </div>
                     </td>
-                    <td className="px-12 py-8">
+                    <td className="px-6 py-8" onClick={() => setSelectedVisitor(v)}>
                       <span className={cn(
                         "px-6 py-2 rounded-full text-[10px] font-black uppercase tracking-widest border",
-                        v.type === 'student' 
+                        v.type?.toLowerCase() === 'student' 
                           ? (isDarkMode ? "bg-brand-dark-secondary/10 text-brand-dark-secondary border-brand-dark-secondary/20" : "bg-brand-light-secondary/10 text-brand-light-primary border-brand-light-secondary/20") : 
-                        v.type === 'faculty' 
+                        v.type?.toLowerCase() === 'faculty' 
                           ? (isDarkMode ? "bg-brand-dark-accent/10 text-brand-dark-accent border-brand-dark-accent/20" : "bg-brand-light-accent/10 text-brand-light-accent border-brand-light-accent/20") : 
                           (isDarkMode ? "bg-brand-dark-secondary/10 text-brand-dark-secondary border-brand-dark-secondary/20" : "bg-brand-light-secondary/10 text-brand-light-primary border-brand-light-secondary/20")
                       )}>
@@ -1838,38 +2048,30 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                       </span>
                     </td>
                     <td className={cn(
-                      "px-12 py-8 text-[11px] font-black uppercase tracking-widest",
+                      "px-6 py-8 text-[11px] font-black uppercase tracking-widest",
                       isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-primary/60"
-                    )}>{v.purpose}</td>
+                    )} onClick={() => setSelectedVisitor(v)}>{v.purpose}</td>
                     <td className={cn(
-                      "px-12 py-8 text-[11px] font-black",
+                      "px-6 py-8 text-[11px] font-black",
                       isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-primary/60"
-                    )}>{format(new Date(v.check_in), 'MMM dd, HH:mm')}</td>
-                    <td className={cn(
-                      "px-12 py-8 text-[11px] font-black",
-                      isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-primary/60"
-                    )}>
-                      {v.check_out ? format(new Date(v.check_out), 'HH:mm') : '--:--'}
-                    </td>
-                    <td className="px-12 py-8">
-                      {v.check_out ? (
-                        <span className={cn(
-                          "text-[10px] font-black uppercase tracking-widest",
-                          isDarkMode ? "text-white/20" : "text-slate-300"
-                        )}>Logged Out</span>
-                      ) : (
-                        <span className="flex items-center gap-3 text-[10px] font-black text-emerald-500 uppercase tracking-widest">
-                          <div className="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-lg shadow-emerald-500/50"></div>
-                          In Library
-                        </span>
-                      )}
-                    </td>
-                    <td className="px-12 py-8">
-                      <div className={cn(
-                        "p-3 rounded-xl transition-all group-hover:translate-x-2",
-                        isDarkMode ? "text-white/20 group-hover:text-white group-hover:bg-white/5" : "text-brand-light-secondary/40 group-hover:text-brand-light-primary group-hover:bg-brand-light-secondary/10"
-                      )}>
-                        <ChevronRight size={24} />
+                    )} onClick={() => setSelectedVisitor(v)}>{format(new Date(v.check_in), 'MMM dd, HH:mm')}</td>
+                    <td className="px-6 py-8 text-right">
+                      <div className="flex items-center justify-end gap-3">
+                        <button 
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleBlock(v.identifier, v.is_blocked === 1);
+                          }}
+                          className={cn(
+                            "p-3 rounded-xl transition-all duration-300",
+                            v.is_blocked === 1
+                              ? "bg-red-500 text-white shadow-lg shadow-red-500/20"
+                              : isDarkMode ? "bg-white/5 text-brand-dark-secondary hover:bg-red-500/20 hover:text-red-500" : "bg-black/5 text-brand-light-secondary hover:bg-red-50 hover:text-red-600"
+                          )}
+                          title={v.is_blocked === 1 ? "Unblock Visitor" : "Block Visitor"}
+                        >
+                          <Ban size={16} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1905,14 +2107,23 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                 isDarkMode ? "border-white/5" : "border-black/5"
               )}>
                 <div className="flex items-center gap-6">
-                  <div className={cn(
-                    "w-16 h-16 rounded-[24px] flex items-center justify-center font-black text-2xl shadow-xl",
-                    isDarkMode 
-                      ? "bg-brand-dark-secondary/10 border border-brand-dark-secondary/20 text-brand-dark-primary" 
-                      : "bg-brand-light-secondary/10 border border-brand-light-secondary/20 text-brand-light-primary"
-                  )}>
-                    {selectedVisitor.name.charAt(0)}
-                  </div>
+                  {selectedVisitor.photoURL ? (
+                    <img 
+                      src={selectedVisitor.photoURL} 
+                      alt={selectedVisitor.name} 
+                      className="w-20 h-20 rounded-[24px] object-cover shadow-xl"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <div className={cn(
+                      "w-20 h-20 rounded-[24px] flex items-center justify-center font-black text-2xl shadow-xl",
+                      isDarkMode 
+                        ? "bg-brand-dark-secondary/10 border border-brand-dark-secondary/20 text-brand-dark-primary" 
+                        : "bg-brand-light-secondary/10 border border-brand-light-secondary/20 text-brand-light-primary"
+                    )}>
+                      {(selectedVisitor.name || 'V').charAt(0)}
+                    </div>
+                  )}
                   <div>
                     <h3 className={cn(
                       "text-2xl font-black tracking-tight mb-1",
@@ -1922,6 +2133,12 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                       "text-[10px] font-black uppercase tracking-widest",
                       isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary"
                     )}>{selectedVisitor.type} • {selectedVisitor.identifier}</p>
+                    {selectedVisitor.email && (
+                      <p className={cn(
+                        "text-[10px] font-black tracking-widest mt-1",
+                        isDarkMode ? "text-brand-dark-secondary/60" : "text-brand-light-secondary/60"
+                      )}>{selectedVisitor.email}</p>
+                    )}
                   </div>
                 </div>
                 <button 
@@ -1939,10 +2156,8 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                 <div className="grid grid-cols-2 gap-8">
                   <DetailItem label="Purpose of Visit" value={selectedVisitor.purpose} isDarkMode={isDarkMode} />
                   <DetailItem label="Check In Time" value={format(new Date(selectedVisitor.check_in), 'MMM dd, HH:mm:ss')} isDarkMode={isDarkMode} />
-                  <DetailItem label="Check Out Time" value={selectedVisitor.check_out ? format(new Date(selectedVisitor.check_out), 'MMM dd, HH:mm:ss') : 'Currently Active'} isDarkMode={isDarkMode} />
-                  {selectedVisitor.type !== 'outsider' ? (
-                    <DetailItem label="Program / Department" value={selectedVisitor.department || 'N/A'} isDarkMode={isDarkMode} />
-                  ) : (
+                  <DetailItem label="Program / Department" value={selectedVisitor.department || 'N/A'} isDarkMode={isDarkMode} />
+                  {selectedVisitor.type === 'outsider' && (
                     <>
                       <DetailItem label="University" value={selectedVisitor.university || 'N/A'} isDarkMode={isDarkMode} />
                       <DetailItem label="Occupation" value={selectedVisitor.occupation || 'N/A'} isDarkMode={isDarkMode} />
@@ -2105,7 +2320,6 @@ function DetailItem({ label, value, isDarkMode }: { label: string, value: string
                 <div className="mt-2 space-y-1">
                   <p className="text-[8px] text-brand-light-secondary font-bold">Owner: chynna.cardona@neu.edu.ph</p>
                   <p className="text-[8px] text-brand-light-secondary font-bold">Owner: jcesperanza@neu.edu.ph</p>
-                  <p className="text-[8px] text-brand-light-secondary font-bold">Owner: cardonachynnam@gmail.com</p>
                 </div>
               </div>
             )}
@@ -2143,13 +2357,6 @@ function DetailItem({ label, value, isDarkMode }: { label: string, value: string
                   className="w-full py-2 rounded-xl bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
                 >
                   Login as chynna.cardona
-                </button>
-                <button 
-                  onClick={() => handleAutoLogin('cardonachynnam@gmail.com')}
-                  disabled={isAdminLoggedIn}
-                  className="w-full py-2 rounded-xl bg-emerald-500 text-white text-[9px] font-bold uppercase tracking-widest disabled:opacity-50"
-                >
-                  Login as cardonachynnam
                 </button>
               </div>
             </div>
