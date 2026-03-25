@@ -41,7 +41,6 @@ import {
   Cell 
 } from 'recharts';
 import { format, subDays, isSameDay, startOfWeek, startOfMonth, startOfYear } from 'date-fns';
-import jsQR from 'jsqr';
 import QRCode from 'qrcode';
 import autoTable from 'jspdf-autotable';
 import { jsPDF } from 'jspdf';
@@ -61,7 +60,8 @@ import {
   getDocFromServer,
   setDoc,
   deleteDoc,
-  getDoc
+  getDoc,
+  limit
 } from 'firebase/firestore';
 import { 
   signInWithEmailAndPassword, 
@@ -154,6 +154,13 @@ interface Stats {
   dailyStats: { date: string; count: number }[];
   avgVisitsPerDay: number;
   peakHour: string;
+}
+
+interface AuditLog {
+  id: string;
+  adminEmail: string;
+  action: string;
+  timestamp: string;
 }
 
 // --- Constants ---
@@ -437,16 +444,20 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
   const [errorMessage, setErrorMessage] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [isInstitutional, setIsInstitutional] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
 
   const handleIdSubmit = async (id: string, type: string, extraData?: any, email?: string, photoURL?: string, institutional: boolean = false) => {
     setIsProcessing(true);
     setIsInstitutional(institutional);
     try {
-      let finalId = id || email || 'GUEST';
+      let finalId = (id || email || 'GUEST').trim();
+      if (finalId.includes('@')) {
+        finalId = finalId.toLowerCase();
+      }
       let finalExtra = extraData || {};
-      let searchEmail = email || (id.includes('@') ? id : undefined);
+      let searchEmail = (email || (id.includes('@') ? id : undefined))?.toLowerCase().trim();
 
-      // If email is provided, try to find the member by email first
+      // 1. If email is provided, try to find the member by email first
       if (searchEmail) {
         const membersRef = collection(db, 'members');
         const qEmail = query(membersRef, where('email', '==', searchEmail));
@@ -459,11 +470,53 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
         }
       }
 
+      // 2. Try to find member by identifier (if not already found by email)
+      if (!finalExtra.department) {
+        const membersRef = collection(db, 'members');
+        const qId = query(membersRef, where('identifier', '==', finalId));
+        const idSnap = await getDocs(qId);
+        
+        if (!idSnap.empty) {
+          const memberData = idSnap.docs[0].data();
+          finalExtra = { ...memberData, ...finalExtra };
+        }
+      }
+
+      // 3. If still missing department/type, check previous visitors
+      if (!finalExtra.department || !finalExtra.type) {
+        const visitorsRef = collection(db, 'visitors');
+        const qVisitor = query(
+          visitorsRef, 
+          where('identifier', '==', finalId),
+          limit(5)
+        );
+        const visitorSnap = await getDocs(qVisitor);
+        if (!visitorSnap.empty) {
+          const visits = visitorSnap.docs.map(d => d.data());
+          visits.sort((a, b) => new Date(b.check_in).getTime() - new Date(a.check_in).getTime());
+          const lastVisit = visits[0];
+          
+          if (!finalExtra.department && lastVisit.department) finalExtra.department = lastVisit.department;
+          if (!finalExtra.type && lastVisit.type) finalExtra.type = lastVisit.type;
+          if (!finalExtra.name && lastVisit.name) finalExtra.name = lastVisit.name;
+        }
+      }
+
       // Check if blocked
       const blockedRef = doc(db, 'blocked', finalId);
       const blockedSnap = await getDoc(blockedRef);
-      if (blockedSnap.exists()) {
-        throw new Error("This ID/Account is blocked.");
+      let isBlocked = blockedSnap.exists();
+      
+      if (!isBlocked && searchEmail) {
+        const blockedEmailRef = doc(db, 'blocked', searchEmail);
+        const blockedEmailSnap = await getDoc(blockedEmailRef);
+        isBlocked = blockedEmailSnap.exists();
+      }
+
+      if (isBlocked) {
+        setShowBlockedModal(true);
+        setIsProcessing(false);
+        return;
       }
 
       const dataToSet: any = { 
@@ -493,7 +546,11 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
           setStep('purpose');
         }
       } else {
-        setStep('details');
+        if (dataToSet.department && dataToSet.type) {
+          setStep('purpose');
+        } else {
+          setStep('details');
+        }
       }
     } catch (err: any) {
       setErrorMessage(err.message);
@@ -616,6 +673,42 @@ function VisitorFlow({ isDarkMode }: { isDarkMode: boolean }) {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {showBlockedModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <motion.div 
+            initial={{ scale: 0.9, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            className={cn(
+              "w-full max-w-sm p-6 rounded-3xl shadow-2xl border text-center",
+              isDarkMode ? "bg-[#1a1a1a] border-white/10" : "bg-white border-black/5"
+            )}
+          >
+            <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-red-500/20 flex items-center justify-center text-red-500">
+              <AlertCircle size={32} />
+            </div>
+            <h3 className={cn(
+              "text-xl font-black uppercase tracking-tight mb-2",
+              isDarkMode ? "text-white" : "text-brand-light-primary"
+            )}>Access Denied</h3>
+            <p className={cn(
+              "text-sm mb-6 font-bold text-red-500",
+              isDarkMode ? "text-red-400" : "text-red-500"
+            )}>
+              Access denied: Blocked/restricted
+            </p>
+            <button
+              onClick={() => {
+                setShowBlockedModal(false);
+                setStep('id');
+              }}
+              className="w-full py-3 rounded-xl font-black uppercase tracking-widest text-[10px] bg-red-500 text-white hover:bg-red-600 transition-colors"
+            >
+              Close
+            </button>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
@@ -627,8 +720,6 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
 }) {
   const [idInput, setIdInput] = useState('');
   const [isOutsider, setIsOutsider] = useState(false);
-  const [qrMode, setQrMode] = useState<'in' | 'out'>('in');
-  const qrModeRef = useRef<'in' | 'out'>('in');
   const [outsiderForm, setOutsiderForm] = useState({
     name: '',
     email: '',
@@ -636,7 +727,7 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
     purpose: ''
   });
   const [showDeniedModal, setShowDeniedModal] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [idNotFound, setIdNotFound] = useState(false);
 
   const validateId = (id: string) => {
     const regex = /^\d{2}-\d{5}-\d{3}$/;
@@ -664,60 +755,11 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
     }
   };
 
-  const handleScanClick = () => {
-    fileInputRef.current?.click();
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const img = new Image();
-      img.onload = () => {
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
-        if (!ctx) return;
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
-        
-        if (code) {
-          try {
-            const data = JSON.parse(code.data);
-            if (data.name === 'Guest 1' || data.name === 'Guest 2') {
-              onNext(data.name, 'outsider', { ...data, identifier: data.name });
-            } else if (data.type === 'outsider') {
-              onNext(data.identifier || data.name, 'outsider', data);
-            } else {
-              // If it's a JSON but not an outsider, maybe it's a student with extra data
-              onNext(data.identifier || data.id || '', data.type || 'Student', data);
-            }
-          } catch {
-            // Not a JSON, maybe it's just a plain text ID
-            if (validateId(code.data.trim())) {
-              onNext(code.data.trim(), 'Student');
-            } else {
-              alert("Invalid QR Code format. Please use the outsider form or a valid NEU QR.");
-            }
-          }
-        } else {
-          alert("No QR code found in image.");
-        }
-      };
-      img.src = event.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  };
-
   return (
     <motion.div 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="w-full max-w-xl mx-auto"
+      className="w-full max-w-sm mx-auto"
     >
       <div className={cn(
         "backdrop-blur-3xl rounded-[32px] shadow-2xl border p-6 flex flex-col items-center transition-all duration-500",
@@ -759,6 +801,25 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
                   placeholder="00-00000-000"
                   value={idInput}
                   onChange={(e) => setIdInput(e.target.value)}
+                  onKeyDown={async (e) => {
+                    if (e.key === 'Enter' && validateId(idInput) && !isProcessing) {
+                      setIdNotFound(false);
+                      try {
+                        const membersRef = collection(db, 'members');
+                        const qId = query(membersRef, where('identifier', '==', idInput));
+                        const idSnap = await getDocs(qId);
+                        
+                        if (idSnap.empty) {
+                          setIdNotFound(true);
+                        } else {
+                          onNext(idInput, 'Student');
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        onNext(idInput, 'Student'); // Fallback
+                      }
+                    }
+                  }}
                   className={cn(
                     "w-full px-4 py-3 rounded-2xl text-xl font-mono tracking-[0.2em] text-center transition-all duration-500 focus:outline-none focus:ring-4",
                     isDarkMode 
@@ -768,33 +829,43 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
                 />
               </div>
 
-              <button
-                onClick={handleGoogleLogin}
-                className={cn(
-                  "w-full py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 transition-all duration-300 border shadow-md",
-                  isDarkMode
-                    ? "bg-white text-black hover:bg-slate-100 border-white/10"
-                    : "bg-brand-light-primary text-white hover:bg-opacity-90 border-black/5"
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-3 h-14">
+                  <button
+                    disabled={!validateId(idInput) || isProcessing}
+                    onClick={async () => {
+                      setIdNotFound(false);
+                      try {
+                        const membersRef = collection(db, 'members');
+                        const qId = query(membersRef, where('identifier', '==', idInput));
+                        const idSnap = await getDocs(qId);
+                        
+                        if (idSnap.empty) {
+                          setIdNotFound(true);
+                        } else {
+                          onNext(idInput, 'Student');
+                        }
+                      } catch (err) {
+                        console.error(err);
+                        onNext(idInput, 'Student'); // Fallback
+                      }
+                    }}
+                    className={cn(
+                      "w-full rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
+                      isDarkMode
+                        ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
+                        : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
+                    )}
+                  >
+                    {isProcessing ? "..." : "Check In"}
+                  </button>
+                </div>
+                {idNotFound && (
+                  <p className="text-red-500 text-xs font-bold text-center mt-2">
+                    ID not found. Please connect with your institutional email below.
+                  </p>
                 )}
-              >
-                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
-                Connect with Institutional Email
-              </button>
-            </div>
-
-            <div className="flex gap-3 h-14">
-              <button
-                disabled={!validateId(idInput) || isProcessing}
-                onClick={() => onNext(idInput, 'Student')}
-                className={cn(
-                  "w-full rounded-xl font-black uppercase tracking-widest text-[10px] shadow-lg transition-all duration-500",
-                  isDarkMode
-                    ? "bg-blue-600 text-white hover:bg-blue-500 disabled:opacity-50"
-                    : "bg-blue-500 text-white hover:bg-blue-400 disabled:opacity-50"
-                )}
-              >
-                {isProcessing ? "..." : "Check In"}
-              </button>
+              </div>
             </div>
 
             <div className="relative py-4 flex items-center justify-center">
@@ -809,27 +880,20 @@ function IdEntryStep({ onNext, isDarkMode, isProcessing }: {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-4">
               <button
-                onClick={handleScanClick}
+                onClick={handleGoogleLogin}
                 className={cn(
-                  "py-3 rounded-xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-2 transition-all duration-300 border",
+                  "w-full py-3 rounded-2xl font-black uppercase tracking-widest text-[10px] flex items-center justify-center gap-3 transition-all duration-300 border shadow-md",
                   isDarkMode
-                    ? "bg-transparent border-white/10 text-white/80 hover:bg-white/5"
-                    : "bg-transparent border-black/10 text-brand-light-primary hover:bg-black/5"
+                    ? "bg-white text-black hover:bg-slate-100 border-white/10"
+                    : "bg-brand-light-primary text-white hover:bg-opacity-90 border-black/5"
                 )}
               >
-                <Contact size={14} />
-                Tap/Scan ID
+                <img src="https://www.google.com/favicon.ico" alt="Google" className="w-4 h-4" />
+                Connect with Institutional Email
               </button>
-              <input
-                type="file"
-                accept="image/*"
-                capture="environment"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                className="hidden"
-              />
+
               <button
                 onClick={() => setIsOutsider(true)}
                 className={cn(
@@ -1290,7 +1354,9 @@ function SuccessStep({ data, onReset, isDarkMode }: { data: Visitor, onReset: ()
             <span className={cn("text-xl font-black", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.purpose}</span>
           </div>
           <div className={cn("flex justify-between items-center border-b pb-4", isDarkMode ? "border-white/10" : "border-black/5")}>
-            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>Email</span>
+            <span className={cn("text-[10px] font-black uppercase tracking-[0.3em]", isDarkMode ? "text-brand-dark-secondary" : "text-brand-light-secondary")}>
+              {data.type === 'outsider' ? 'Email' : 'ID'}
+            </span>
             <span className={cn("text-xl font-mono font-black tracking-[0.2em]", isDarkMode ? "text-brand-dark-primary" : "text-brand-light-primary")}>{data.identifier}</span>
           </div>
           <div className="flex justify-between items-center">
@@ -1375,6 +1441,21 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
   const [selectedVisitor, setSelectedVisitor] = useState<Visitor | null>(null);
   const [showDeniedModal, setShowDeniedModal] = useState(false);
   const [deniedEmail, setDeniedEmail] = useState('');
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+
+  useEffect(() => {
+    if (isLoggedIn && showHistoryModal) {
+      const q = query(collection(db, 'audit_logs'), orderBy('timestamp', 'desc'));
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const logs = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id })) as AuditLog[];
+        setAuditLogs(logs);
+      }, (err) => {
+        handleFirestoreError(err, OperationType.LIST, 'audit_logs');
+      });
+      return () => unsubscribe();
+    }
+  }, [isLoggedIn, showHistoryModal]);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -1462,13 +1543,29 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
 
   const handleBlock = async (id: string, currentlyBlocked: boolean) => {
     try {
+      const normalizedId = id.includes('@') ? id.toLowerCase().trim() : id.trim();
+      
       // Find all visitor records for this identifier and update them
       const q = query(collection(db, 'visitors'), where('identifier', '==', id));
       const snap = await getDocs(q);
       const batchPromises = snap.docs.map(d => updateDoc(doc(db, 'visitors', d.id), { is_blocked: currentlyBlocked ? 0 : 1 }));
       await Promise.all(batchPromises);
       
+      // Update the blocked collection
+      if (currentlyBlocked) {
+        await deleteDoc(doc(db, 'blocked', normalizedId));
+        if (id !== normalizedId) await deleteDoc(doc(db, 'blocked', id));
+      } else {
+        await setDoc(doc(db, 'blocked', normalizedId), { blockedAt: new Date().toISOString() });
+      }
+      
       if (selectedVisitor) setSelectedVisitor({ ...selectedVisitor, is_blocked: currentlyBlocked ? 0 : 1 });
+
+      await addDoc(collection(db, 'audit_logs'), {
+        adminEmail: auth.currentUser?.email || 'Unknown Admin',
+        action: currentlyBlocked ? `Unblocked user ${id}` : `Blocked user ${id}`,
+        timestamp: new Date().toISOString()
+      });
     } catch (err: any) {
       handleFirestoreError(err, OperationType.UPDATE, 'visitors');
     }
@@ -1491,6 +1588,12 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
       });
       await batch.commit();
       
+      await addDoc(collection(db, 'audit_logs'), {
+        adminEmail: auth.currentUser?.email || 'Unknown Admin',
+        action: `Cleared ${snap.docs.length} visitor logs`,
+        timestamp: new Date().toISOString()
+      });
+
       setIsConfirmingClear(false);
     } catch (err: any) {
       console.error("AdminFlow: Error clearing logs:", err);
@@ -1682,6 +1785,27 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
     return true;
   });
 
+  const downloadAuditPDF = () => {
+    const doc = new jsPDF();
+    doc.text("Audit History Logs", 14, 15);
+    
+    const tableColumn = ["Action", "Admin Email", "Date", "Time"];
+    const tableRows = auditLogs.map(log => [
+      log.action,
+      log.adminEmail,
+      format(new Date(log.timestamp), 'MMM d, yyyy'),
+      format(new Date(log.timestamp), 'HH:mm:ss')
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 20,
+    });
+
+    doc.save(`audit_logs_${format(new Date(), 'yyyyMMdd_HHmmss')}.pdf`);
+  };
+
   return (
     <div className="space-y-6">
       {/* Admin Nav */}
@@ -1736,18 +1860,29 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
               </button>
             </div>
           ) : (
-            <button 
-              onClick={() => setIsConfirmingClear(true)}
-              className={cn(
-                "flex items-center gap-2 px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 backdrop-blur-3xl border shadow-lg hover:scale-105 group",
-                isDarkMode 
-                  ? "bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500/20" 
-                  : "bg-red-50 border-red-200 text-red-600 hover:bg-red-100"
-              )}
-            >
-              <X size={14} className="group-hover:rotate-90 transition-transform" />
-              Clear Logs
-            </button>
+            <>
+              <button 
+                onClick={() => setShowHistoryModal(true)}
+                className={cn(
+                  "flex items-center gap-2 px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 backdrop-blur-3xl border shadow-lg hover:scale-105 group",
+                  isDarkMode 
+                    ? "bg-white/5 border-white/10 text-brand-dark-primary hover:bg-white/10" 
+                    : "bg-white border-black/5 text-brand-light-primary hover:bg-black/5"
+                )}
+              >
+                <Clock size={12} />
+                History
+              </button>
+              <button 
+                onClick={() => setIsConfirmingClear(true)}
+                title="Clear Logs"
+                className={cn(
+                  "flex items-center justify-center w-8 h-8 rounded-lg transition-all duration-500 border shadow-lg hover:scale-105 group bg-red-500/20 text-white border-red-500/50 hover:bg-red-500/40 backdrop-blur-md"
+                )}
+              >
+                <X size={14} className="group-hover:rotate-90 transition-transform" />
+              </button>
+            </>
           )}
           <button 
             onClick={generatePDF}
@@ -1764,10 +1899,7 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
           <button 
             onClick={handleLogout}
             className={cn(
-              "flex items-center gap-2 px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 border shadow-lg hover:scale-105 group",
-              isDarkMode
-                ? "bg-red-500/10 border-red-500/20 text-red-500 hover:bg-red-500/20"
-                : "bg-red-50 border border-red-100 text-red-600 hover:bg-red-100"
+              "flex items-center gap-2 px-4 py-2 rounded-lg font-black uppercase tracking-widest text-[9px] transition-all duration-500 border shadow-lg hover:scale-105 group bg-red-500/20 text-white border-red-500/50 hover:bg-red-500/40 backdrop-blur-md"
             )}
           >
             <LogOut size={12} />
@@ -2154,6 +2286,7 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
               
               <div className="space-y-8">
                 <div className="grid grid-cols-2 gap-8">
+                  <DetailItem label="ID" value={selectedVisitor.identifier} isDarkMode={isDarkMode} />
                   <DetailItem label="Purpose of Visit" value={selectedVisitor.purpose} isDarkMode={isDarkMode} />
                   <DetailItem label="Check In Time" value={format(new Date(selectedVisitor.check_in), 'MMM dd, HH:mm:ss')} isDarkMode={isDarkMode} />
                   <DetailItem label="Program / Department" value={selectedVisitor.department || 'N/A'} isDarkMode={isDarkMode} />
@@ -2184,6 +2317,55 @@ function AdminFlow({ isLoggedIn, onLogin, onLogout, isDarkMode }: {
                     {selectedVisitor.is_blocked === 1 ? "Unblock Visitor" : "Block Visitor"}
                   </button>
                 </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              className={cn(
+                "w-full max-w-2xl p-6 rounded-3xl shadow-2xl border flex flex-col max-h-[80vh]",
+                isDarkMode ? "bg-[#1a1a1a] border-white/10" : "bg-white border-black/5"
+              )}
+            >
+              <div className="flex justify-between items-center mb-6">
+                <h3 className={cn(
+                  "text-xl font-black uppercase tracking-tight",
+                  isDarkMode ? "text-white" : "text-brand-light-primary"
+                )}>Audit History</h3>
+                <div className="flex items-center gap-2">
+                  <button onClick={downloadAuditPDF} className="text-gray-500 hover:text-brand-light-primary transition-colors" title="Download PDF">
+                    <Download size={20} />
+                  </button>
+                  <button onClick={() => setShowHistoryModal(false)} className="text-gray-500 hover:text-red-500 transition-colors">
+                    <X size={24} />
+                  </button>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto pr-2 space-y-3">
+                {auditLogs.length === 0 ? (
+                  <p className="text-center text-gray-500 py-8">No audit logs found.</p>
+                ) : (
+                  auditLogs.map(log => (
+                    <div key={log.id} className={cn(
+                      "p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2",
+                      isDarkMode ? "bg-white/5 border-white/10" : "bg-black/5 border-black/5"
+                    )}>
+                      <div>
+                        <p className={cn("font-bold text-sm", isDarkMode ? "text-white" : "text-black")}>{log.action}</p>
+                        <p className="text-xs text-gray-500">{log.adminEmail}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-xs font-mono text-gray-500">{format(new Date(log.timestamp), 'MMM d, yyyy')}</p>
+                        <p className="text-xs font-mono text-gray-500">{format(new Date(log.timestamp), 'HH:mm:ss')}</p>
+                      </div>
+                    </div>
+                  ))
+                )}
               </div>
             </motion.div>
           </div>

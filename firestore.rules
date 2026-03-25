@@ -94,5 +94,9 @@ service cloud.firestore {
       allow update: if (request.auth.uid == userId && (!('role' in request.resource.data) || request.resource.data.role == resource.data.role)) || isAdmin() || isOwner();
       allow delete: if isAdmin() || isOwner();
     }
+
+    match /audit_logs/{logId} {
+      allow read, write: if isAdmin() || isOwner();
+    }
   }
 }
