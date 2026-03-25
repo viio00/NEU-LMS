@@ -4,7 +4,8 @@
 
 ## 🚀 Live Application
 You can access the deployed application here:
-[**NEU LibTrac Live App**](https://ais-pre-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app)
+[**NEU LibTrac Live App**](
+https://ais-pre-xsnpdq7hi5z654s6bimjed-511035442414.asia-southeast1.run.app)
 
 ---
 
